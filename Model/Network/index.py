@@ -1,4 +1,3 @@
-import segmentation_models_pytorch as smp
 import torch.nn.functional as F
 import torch
 import torch.optim as optim
