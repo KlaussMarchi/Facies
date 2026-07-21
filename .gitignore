@@ -1,12 +1,6 @@
 *.pyc
-*.png
-*.jpeg
-*.jpg
-*.png
-*.json
 *.npy
 *.pth
 *.bmp
-*.csv
 *.zip
 *.dat

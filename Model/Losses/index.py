@@ -11,7 +11,8 @@ class MultiClassDiceLoss(nn.Module):
         self._loss = losses.DiceLoss(softmax=True, to_onehot_y=True, include_background=True)
 
     def forward(self, predicted, target):
-        return self._loss(predicted, target)
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(predicted.float(), target.float())
 
 class MultiClassDiceCELoss(nn.Module):
     def __init__(self):
@@ -19,7 +20,8 @@ class MultiClassDiceCELoss(nn.Module):
         self._loss = losses.DiceCELoss(softmax=True, to_onehot_y=True, include_background=True)
 
     def forward(self, predicted, target):
-        return self._loss(predicted, target)
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(predicted.float(), target.float())
 
 class MultiClassDiceFocalLoss(nn.Module):
     def __init__(self):
@@ -27,7 +29,8 @@ class MultiClassDiceFocalLoss(nn.Module):
         self._loss = losses.DiceFocalLoss(softmax=True, to_onehot_y=True, include_background=True)
 
     def forward(self, predicted, target):
-        return self._loss(predicted, target)
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(predicted.float(), target.float())
 
 class MultiClassFocalLoss(nn.Module):
     def __init__(self):
@@ -35,7 +38,8 @@ class MultiClassFocalLoss(nn.Module):
         self._loss = losses.FocalLoss(to_onehot_y=True, gamma=2.0, use_softmax=True)
 
     def forward(self, predicted, target):
-        return self._loss(predicted, target)
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(predicted.float(), target.float())
 
 class MultiClassTverskyLoss(nn.Module):
     def __init__(self):
@@ -43,7 +47,8 @@ class MultiClassTverskyLoss(nn.Module):
         self._loss = losses.TverskyLoss(softmax=True, to_onehot_y=True)
     
     def forward(self, predicted, target):
-        return self._loss(predicted, target)
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(predicted.float(), target.float())
 
 # --- BINARY WRAPPERS ---
 
@@ -51,46 +56,74 @@ class BinaryDiceLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self._loss = losses.DiceLoss(to_onehot_y=False, sigmoid=True)
-    def forward(self, p, t): return self._loss(p, t)
 
-class BinaryDiceCELoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self._loss = losses.DiceCELoss(to_onehot_y=False, sigmoid=True)
-    def forward(self, p, t): return self._loss(p, t)
+    def forward(self, p, t):
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(p.float(), t.float())
+
 
 class BinaryDiceFocalLoss(nn.Module):
     def __init__(self):
         super().__init__()
         self._loss = losses.DiceFocalLoss(to_onehot_y=False, sigmoid=True)
-    def forward(self, p, t): return self._loss(p, t)
+
+    def forward(self, p, t):
+        with torch.amp.autocast('cuda', enabled=False):
+            return self._loss(p.float(), t.float())
 
 class CustomDiceBCELoss(nn.Module):
-    def __init__(self, smooth=1.0):
+    def __init__(self, smooth=1e-5):
         super().__init__()
-        self.bce = nn.BCEWithLogitsLoss()
+        self.bce = nn.BCEWithLogitsLoss() 
         self.smooth = smooth
         
     def forward(self, logits, y):
-        bce_loss = self.bce(logits, y.float())
-        p = torch.sigmoid(logits)
-        
-        spatial_dims = (2, 3, 4) if p.ndim == 5 else (2, 3)
-        intersection = (p * y).sum(dim=spatial_dims)
-        union = p.sum(dim=spatial_dims) + y.sum(dim=spatial_dims)
-        
-        dice = (2. * intersection + self.smooth) / (union + self.smooth)
-        dice_loss = 1 - dice.mean()
-        return 0.5 * bce_loss + 0.5 * dice_loss
+        with torch.amp.autocast('cuda', enabled=False):
+            logits = logits.float()
+            y = y.float()
+            
+            if y.shape != logits.shape:
+                y = y.view_as(logits)
+
+            bce_loss = self.bce(logits, y)
+            p = torch.sigmoid(logits)
+            
+            p_flat = p.contiguous().view(p.shape[0], -1)
+            y_flat = y.contiguous().view(y.shape[0], -1)
+            
+            intersection = (p_flat * y_flat).sum(dim=1)
+            union = p_flat.sum(dim=1) + y_flat.sum(dim=1)
+            dice = (2. * intersection + self.smooth) / (union + self.smooth)
+            dice_loss = 1 - dice.mean()
+            return 0.5 * bce_loss + 0.5 * dice_loss
+
+
+class BinaryDiceFocalLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._loss = losses.DiceFocalLoss(to_onehot_y=False, sigmoid=True)
+
+    def forward(self, logits, target):
+        with torch.amp.autocast('cuda', enabled=False):
+            logits = logits.float()
+            target = target.float()
+            
+            # PROTEÇÃO DE SHAPE (OBRIGATÓRIA)
+            if target.shape != logits.shape:
+                target = target.view_as(logits)
+                
+            return self._loss(logits, target)
+
 
 class Losses:
     binary = {
         'dice': BinaryDiceLoss(),
         'dice_bce':  CustomDiceBCELoss(),
-        'dice_focal': BinaryDiceFocalLoss()
+        'dice_focal': BinaryDiceFocalLoss(),
+        'focal': BinaryDiceFocalLoss()
     }
 
-    multiclass = {    
+    multiclass = {   
         'dice': MultiClassDiceLoss(),        
         'dice_focal': MultiClassDiceFocalLoss(),  
         'focal': MultiClassFocalLoss(),           

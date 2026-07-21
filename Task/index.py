@@ -1,11 +1,8 @@
-# conda activate NOME_ENV
-# pip install papermill
-# conda install ipykernel
-# python -m ipykernel install --user --name=NOME_ENV
-
 import papermill as pm
 from pathlib import Path
 import os, json
+
+KERNEL_NAME = 'python3'
 
 
 def execute(path):
@@ -17,7 +14,7 @@ def execute(path):
     out = os.path.join('logs', f'{name}_out{ext}')    
     
     try:
-        pm.execute_notebook(path, out, kernel_name='torch-gpu', log_output=True, progress_bar=True, cwd=str(dir_path))
+        pm.execute_notebook(path, out, kernel_name=KERNEL_NAME, log_output=True, progress_bar=True, cwd=str(dir_path))
     except Exception as e:
         print(f'Error executing {path}: {e}')
 
@@ -35,9 +32,9 @@ for i, task in enumerate(tasks):
         info = json.load(file)
     
     print('info: ', info)
-    execute('../Dataset/raw/RawFormat.ipynb')
-    execute('../Dataset/target/TarFormat.ipynb')
+    dataset = info.get('dataset')
+    print(dataset)
 
-    execute("../Model/1 - Processing.ipynb")
-    execute("../Model/2 - Model.ipynb")
-    execute("../Model/3 - PostProcessing.ipynb")
+    execute(f"../Dataset/{dataset}/Format.ipynb")
+    execute("../Model/Analysis.ipynb")
+    execute("../Model/Predict.ipynb")
