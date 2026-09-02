@@ -3,15 +3,15 @@
     "dataset": "facies",
     "img_size": [
         4,
-        256,
-        256
+        512,
+        512
     ],
     "step": 3,
     "multiclass": true,
     "lr": 0.0005,
     "loss": "dice_focal",
-    "batch_size": 4,
+    "batch_size": 2,
     "scheduler": "plateau",
     "dropout": 0.05,
-    "num_filters": 32
+    "num_filters": 16
 }

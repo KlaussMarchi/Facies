@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
+try:
+    from utils.index import FACIES_COLORS
+except ImportError:
+    from Model.utils.index import FACIES_COLORS
 
 
 class Plotter:
@@ -7,7 +11,17 @@ class Plotter:
         keys = [str(key) for key in metrics.keys()]
         values = list(metrics.values())
         n      = len(metrics)
-        colors = plt.cm.tab10(np.arange(n)) if n <= 10 else plt.cm.viridis(np.linspace(0, 1, n))
+        
+        base_cols = plt.cm.tab10(np.arange(n)) if n <= 10 else plt.cm.viridis(np.linspace(0, 1, n))
+        colors = []
+        for i, key in enumerate(keys):
+            if key.isdigit() and int(key) < len(FACIES_COLORS):
+                colors.append(FACIES_COLORS[int(key)])
+            elif key.lower() == 'mean':
+                colors.append('#708090')  # Slate Gray para a média
+            else:
+                colors.append(base_cols[i % len(base_cols)])
+
         bars = plt.bar(keys, values, color=colors)
         
         plt.grid(axis='y', alpha=0.3, linestyle='--')

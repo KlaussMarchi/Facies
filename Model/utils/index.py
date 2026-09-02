@@ -43,7 +43,7 @@ FACIES_COLORS = [
 
 def faciesCmaps(n_classes):
     """Retorna (cmap_solido, cmap_overlay) com `n_classes` cores discretas.
-    No overlay a classe 0 (fundo) fica transparente."""
+    A classe 0 é totalmente preenchida na cor preta (sem transparência de fundo)."""
     n_classes = max(int(n_classes), 2)
     if n_classes <= len(FACIES_COLORS):
         base = list(FACIES_COLORS[:n_classes])
@@ -52,14 +52,11 @@ def faciesCmaps(n_classes):
 
     solid = ListedColormap(base)
     overlay_cols = list(base)
-    overlay_cols[0] = (0, 0, 0, 0)  # fundo transparente
     return solid, ListedColormap(overlay_cols)
 
 
 def showTile(img=None, mask=None, save=None, classes=None):
-    """Mostra os 3 planos médios de um tile 3D.
-    - `mask` inteira é desenhada com paleta discreta por classe (multiclasse).
-    - `classes` fixa o nº de classes (cores estáveis entre tiles); se None, deriva da máscara."""
+    """Mostra os 3 planos médios de um tile 3D com legenda associando o número de cada classe à sua cor."""
     if img is None and mask is None:
         return print("Erro: Forneça pelo menos 'img' ou 'mask'.")
 
@@ -85,7 +82,7 @@ def showTile(img=None, mask=None, save=None, classes=None):
         cmap_mask_only, cmap_mask_overlay = faciesCmaps(n_classes)
         vmax = max(int(n_classes), 2) - 1
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(13, 5))
     titles    = [f'Slice X={mid_x}', f'Slice Y={mid_y}', f'Slice Z={mid_z}']
 
     for i, ax in enumerate(axes):
@@ -98,12 +95,19 @@ def showTile(img=None, mask=None, save=None, classes=None):
             else:
                 ax.imshow(mask_slices[i], cmap=cmap_mask_only, vmin=0, vmax=vmax)
 
-        ax.set_title(titles[i])
+        ax.set_title(titles[i], fontsize=12)
+        ax.axis('off')
 
-    plt.tight_layout()
+    if mask is not None:
+        from matplotlib.patches import Patch
+        legend_elements = [Patch(facecolor=cmap_mask_only.colors[c], edgecolor='white', label=f'Classe {c}') for c in range(n_classes)]
+        fig.legend(handles=legend_elements, loc='lower center', ncol=min(n_classes, 7), bbox_to_anchor=(0.5, 0.01), fontsize=11)
+        plt.tight_layout(rect=[0, 0.08, 1, 1])
+    else:
+        plt.tight_layout()
 
     if save:
-        plt.savefig(save, bbox_inches='tight', dpi=300)
+        plt.savefig(save, bbox_inches='tight', dpi=200)
         return plt.close(fig)
 
     plt.show()
