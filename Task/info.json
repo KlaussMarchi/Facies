@@ -1,17 +1,18 @@
 {
     "network": "resaceunet",
+    "multi-gpu": true,
     "dataset": "facies",
     "img_size": [
         4,
-        512,
-        512
+        256,
+        256
     ],
     "step": 3,
     "multiclass": true,
     "lr": 0.0005,
     "loss": "dice_focal",
-    "batch_size": 2,
+    "batch_size": 16,
     "scheduler": "plateau",
     "dropout": 0.05,
-    "num_filters": 16
+    "num_filters": 32
 }

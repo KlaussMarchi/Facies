@@ -4,3 +4,4 @@
 *.bmp
 *.zip
 *.dat
+.claude/settings.local.json

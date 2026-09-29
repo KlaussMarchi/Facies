@@ -102,7 +102,7 @@ class Unet3D_V2(nn.Module):
     def __init__(self, img_channels=1, classes=7, num_filters=16, kernel_size=3, batchnorm=True, activation='leaky', dropout=0.05):
         super(Unet3D_V2, self).__init__()
         self.classes = classes
-        use_norm = bool(batchnorm)
+        use_norm     = bool(batchnorm)
 
         # -------- Encoder --------
         # Níveis 1-2: NÃO reduzem a profundidade D (pool (1,2,2))
