@@ -1,7 +1,6 @@
 [
     {
-        "network": "unet3d_v2",
-        "multi-gpu": true,
+        "network": "dbrnet",
         "dataset": "facies",
         "img_size": [
             4,
@@ -9,12 +8,162 @@
             256
         ],
         "step": 3,
+        "scaling": "percentile",
         "multiclass": true,
-        "lr": 0.0005,
+        "lr": 0.0001,
         "loss": "dice_focal",
-        "batch_size": 32,
+        "batch_size": 2,
         "scheduler": "plateau",
         "dropout": 0.05,
-        "num_filters": 32
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "segresnet",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "resaceunet_grva",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "macnn",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "fault_seg_net",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "nru_net",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
+    },
+
+    {
+        "network": "fault_edge_former",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 36,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "n_trials": 1
     }
 ]

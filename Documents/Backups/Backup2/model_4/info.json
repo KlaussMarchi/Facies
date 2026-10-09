@@ -1,0 +1,67 @@
+{
+    "trainer": {
+        "path": "model_4",
+        "loss": "dice_focal",
+        "scheduler": "plateau",
+        "epochs": 200,
+        "batch_size": 4,
+        "val_iou": 0.936983585357666,
+        "test_iou": 0.9350199103355408
+    },
+    "processing": {
+        "network": "dbrnet",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0005,
+        "loss": "dice_focal",
+        "batch_size": 4,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "n_images": {
+            "total": 7074,
+            "train": 5658,
+            "val": 708,
+            "test": 708
+        }
+    },
+    "model": {
+        "network": "dbrnet",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "classes": 6,
+        "channels": 1,
+        "dropout": 0.05,
+        "num_filters": 32,
+        "lr": 0.0005,
+        "deep_supervision": false
+    },
+    "iou": {
+        "5": 0.995764434337616,
+        "0": 0.9846729040145874,
+        "3": 0.9291530847549438,
+        "4": 0.9146345853805542,
+        "2": 0.9055125713348389,
+        "1": 0.8803818225860596,
+        "mean": 0.9350199103355408
+    },
+    "marlim_iou": {
+        "0": 0.9895528272832943,
+        "1": 0.9242517120826305,
+        "2": 0.944115200878575,
+        "3": 0.9563229365513318,
+        "4": 0.9409722811074097,
+        "5": 0.993894585648922,
+        "mean": 0.9581849239253607
+    }
+}

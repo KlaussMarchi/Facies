@@ -1,0 +1,67 @@
+{
+    "trainer": {
+        "path": "model_1",
+        "loss": "dice_focal",
+        "scheduler": "plateau",
+        "epochs": 200,
+        "batch_size": 4,
+        "val_iou": 0.8071743249893188,
+        "test_iou": 0.8394744992256165
+    },
+    "processing": {
+        "network": "resaceunet_grva",
+        "dataset": "facies",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 10,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0005,
+        "loss": "dice_focal",
+        "batch_size": 4,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "n_images": {
+            "total": 2133,
+            "train": 1705,
+            "val": 214,
+            "test": 214
+        }
+    },
+    "model": {
+        "network": "resaceunet_grva",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "classes": 6,
+        "channels": 1,
+        "dropout": 0.05,
+        "num_filters": 32,
+        "lr": 0.0005,
+        "deep_supervision": false
+    },
+    "iou": {
+        "0": 0.9535641670227051,
+        "1": 0.6941053867340088,
+        "2": 0.7819175720214844,
+        "3": 0.8307995200157166,
+        "4": 0.7946516871452332,
+        "5": 0.9818085432052612,
+        "mean": 0.8394744992256165
+    },
+    "marlim_iou": {
+        "0": 0.9621141196840735,
+        "1": 0.7796714346097204,
+        "2": 0.8274420335625197,
+        "3": 0.867539337736793,
+        "4": 0.836034245228602,
+        "5": 0.9853827215912417,
+        "mean": 0.8763639820688249
+    }
+}

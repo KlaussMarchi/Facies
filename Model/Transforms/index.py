@@ -1,385 +1,129 @@
-import random
 import numpy as np
 from scipy import ndimage
+from scipy.special import erf
+from monai.inferers import sliding_window_inference
 
-"""
-Builds a 3D augmentation pipeline from a JSON-compatible list.
 
-Args:
-    config: list of dicts, each with "name" and optional "args".
+# AUMENTAÇÃO DINÂMICA DO TREINO NA RECEITA DA RESACEUNET (ZU ET AL. 2024, data/build_data.py DE github.com/39c5bb-miku/ResACEUnet) MAIS O ZOOM DA ESCALA DO MARLIM
+# NAS FACIES O RÓTULO É A CLASSE (0 A N-1, SEM FUNDO): A MÁSCARA SEGUE A IMAGEM PELO VIZINHO MAIS PRÓXIMO E A BORDA ESPELHA O TILE EM VEZ DE ZERAR
+class Transforms:
+    OPTIONS = ('zoom', 'contrast', 'rotate90', 'flip', 'rotate', 'smooth', 'noise', 'crop')
 
-Example:
-    [
-        {"name": "RandomFlip",      "args": {"axes": [0, 1, 2], "p": 0.5}},
-        {"name": "Rot90",           "args": {"axes": [1, 2], "p": 0.5}},
-        {"name": "GaussianNoise",   "args": {"std": [0.01, 0.05], "p": 0.5}},
-        {"name": "GaussianBlur",    "args": {"sigma": [0.5, 1.5], "p": 0.3}},
-        {"name": "IntensityScale",  "args": {"low": 0.9, "high": 1.1, "p": 0.3}},
-        {"name": "IntensityShift",  "args": {"low": -0.1, "high": 0.1, "p": 0.3}},
-        {"name": "GammaCorrection", "args": {"low": 0.7, "high": 1.5, "p": 0.2}},
-        {"name": "CoarseDropout",   "args": {"n": 3, "size": [8, 16], "p": 0.3}},
-        {"name": "Contrast",        "args": {"low": 0.8, "high": 1.2, "p": 0.3}},
-        {"name": "ElasticDeformation","args": {"alpha": 4, "sigma": 1, "p": 0.15}},
-        {"name": "RandomShift",     "args": {"max_shift": [4, 4, 4], "p": 0.2}},
-        {"name": "RandomZoom",      "args": {"low": 0.9, "high": 1.1, "p": 0.2}},
-        {"name": "Normalize"},          # ⚠ ver AVISO
-        {"name": "Clip",            "args": {"low": -3, "high": 3}}   # ⚠ ver AVISO
-    ]
+    def __init__(self, options=None, seed=42, batch=1):
+        self.options = dict(options or {})
+        self.seed    = seed
+        self.batch   = batch
 
-AVISO (evita queda de IoU): os dados já são gravados em [0,1] no Format (ver DataBase.csv)
-e val/teste NÃO passam por transforms. Logo NÃO use "Normalize"/"Clip" (z-score) só no
-treino — isso reescala apenas o treino para mean0/std1 (~[-3,3]) e dessincroniza a
-distribuição em relação a val/teste, derrubando o IoU. Prefira o bloco "Sugestão" abaixo
-(apenas espaciais + intensidade leve, que mantêm o range ~[0,1]).
+        # n_aug: QUANTAS VARIAÇÕES DE CADA TILE ENTRAM POR ÉPOCA (1 NOS AUTORES, O num_samples DO RandCropByPosNegLabeld)
+        self.copies = int(self.options.pop('n_aug', 1))
 
-Sugestão:
-[
-    {"name": "RandomFlip",     "args": {"axes": [0, 1, 2], "p": 0.5}},
-    {"name": "Rot90",          "args": {"axes": [1, 2],    "p": 0.5}},
-    {"name": "GaussianNoise",  "args": {"std": [0.01, 0.03], "p": 0.4}},
-    {"name": "IntensityScale", "args": {"low": 0.9, "high": 1.1, "p": 0.3}}
-]
+        unknown = set(self.options) - set(self.OPTIONS)
+        if unknown:
+            raise ValueError(f'augmentations desconhecidas: {sorted(unknown)}; as opções são {self.OPTIONS}')
 
-"""
+        crop = self.options.get('crop') or {}
+        self.window  = tuple(crop['size']) if crop else None
+        self.overlap = crop.get('overlap', 0.5)
+        self.mode    = crop.get('mode', 'gaussian')
 
-class Transform3D:
-    """Base class for 3D augmentation transforms."""
-    def __init__(self, p=0.5, **kwargs):
-        self.p = p
+    # APLICA AS AUMENTAÇÕES NA ORDEM DO JSON; A SEMENTE (seed, epoch, index) DÁ O MESMO SORTEIO EM QUALQUER WORKER OU ORDEM
+    def apply(self, img, mask, epoch=0, index=0):
+        rng = np.random.default_rng([self.seed, epoch, index])
 
-    def __call__(self, img, mask):
-        if random.random() < self.p:
-            return self.apply(img, mask)
+        for name, params in self.options.items():
+            if rng.random() < params.get('prob', 1.0):
+                img, mask = getattr(self, name)(img, mask, rng, params)
+
+        return np.ascontiguousarray(img, np.float32), np.ascontiguousarray(mask, np.float32)
+
+    # ZOOM ISOTRÓPICO: UM CUBO DE LADO tile/f EM POSIÇÃO SORTEADA VOLTA AO TAMANHO DO TILE, COM f LOG-UNIFORME EM factor. PERÍODO,
+    # REJEITO E ESPAÇAMENTO DAS FALHAS CRESCEM JUNTOS E O MERGULHO FICA; f < 1 EXIGIRIA INVENTAR BORDA, POR ISSO É PROIBIDO
+    # A CLASSE VAI PELO VIZINHO MAIS PRÓXIMO: A BILINEAR COM LIMIAR DAS FALHAS INVENTARIA CLASSE INTERMEDIÁRIA NA TRANSIÇÃO
+    def zoom(self, img, mask, rng, params):
+        if min(params['factor']) < 1:
+            raise ValueError(f'zoom com fator {params["factor"]}: abaixo de 1 o tile encolheria e a borda teria de ser inventada')
+
+        factor = float(np.exp(rng.uniform(*np.log(params['factor']))))
+        shape  = np.array(img.shape)
+        start  = rng.uniform(0, shape - shape / factor)
+        offset = start + 0.5 / factor - 0.5
+
+        img  = ndimage.affine_transform(img, np.full(img.ndim, 1 / factor), offset, order=1, mode='nearest')
+        mask = ndimage.affine_transform(mask, np.full(mask.ndim, 1 / factor), offset, order=0, mode='nearest')
         return img, mask
 
-    def apply(self, img, mask):
-        raise NotImplementedError
+    # GAMMA NA FAIXA DO PRÓPRIO TILE (AdjustContrast): O MÍNIMO E O MÁXIMO FICAM, O MEIO SOBE OU DESCE
+    def contrast(self, img, mask, rng, params):
+        gamma = float(rng.uniform(*params['gamma']))
+        low, span = img.min(), img.max() - img.min()
+        return ((img - low) / (span + 1e-7)) ** gamma * span + low, mask
 
+    # GIRO DE 90, 180 OU 270 GRAUS NO PLANO DOS EIXOS (RandRotate90d); É UMA VIEW, NÃO COPIA O TILE
+    # SÓ EM PLANO QUADRADO: NO TILE (4, 256, 256) O PLANO [0, 2] TROCARIA O SHAPE E O LOTE NÃO EMPILHARIA
+    def rotate90(self, img, mask, rng, params):
+        k, axes = int(rng.integers(1, 4)), tuple(params['axes'])
+        if img.shape[axes[0]] != img.shape[axes[1]]:
+            raise ValueError(f'rotate90 nos eixos {axes} do tile {img.shape}: os dois eixos do plano precisam ter o mesmo tamanho')
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Spatial transforms (applied to BOTH image and mask)
-# ─────────────────────────────────────────────────────────────────────────────
+        return np.rot90(img, k, axes), np.rot90(mask, k, axes)
 
-class RandomFlip(Transform3D):
-    """Random flip along each of the specified axes independently."""
-    def __init__(self, axes=None, **kwargs):
-        super().__init__(**kwargs)
-        self.axes = axes or [0, 1, 2]
+    # ESPELHA TODOS OS EIXOS DA LISTA NUM SORTEIO SÓ (RandFlipd COM spatial_axis=[0, 1]); TAMBÉM É VIEW
+    def flip(self, img, mask, rng, params):
+        axes = tuple(params['axes'])
+        return np.flip(img, axes), np.flip(mask, axes)
 
-    def apply(self, img, mask):
-        for axis in self.axes:
-            if random.random() < 0.5:
-                img = np.flip(img, axis=axis).copy()
-                mask = np.flip(mask, axis=axis).copy()
+    # ROTAÇÃO LIVRE EM TORNO DO CENTRO, UM ÂNGULO EM [-angle, angle] POR PLANO, BILINEAR NA IMAGEM (RandRotated)
+    # A CLASSE VAI PELO VIZINHO MAIS PRÓXIMO, E O CANTO QUE SAI DO TILE ESPELHA IMAGEM E RÓTULO JUNTOS: A BORDA ZERO DAS FALHAS
+    # AQUI SERIA SÍSMICA MORTA ROTULADA COMO A CLASSE 0, QUE É UMA FACIES DE VERDADE
+    def rotate(self, img, mask, rng, params):
+        matrix = np.eye(3)
+
+        for first, second in params['planes']:
+            angle = rng.uniform(-params['angle'], params['angle'])
+            plane = np.eye(3)
+            plane[[first, first, second, second], [first, second, first, second]] = [np.cos(angle), -np.sin(angle), np.sin(angle), np.cos(angle)]
+            matrix = matrix @ plane
+
+        center = (np.array(img.shape) - 1) / 2
+        offset = center - matrix @ center
+        img  = ndimage.affine_transform(img, matrix, offset, order=1, mode='reflect')
+        mask = ndimage.affine_transform(mask, matrix, offset, order=0, mode='reflect')
         return img, mask
 
+    # SUAVIZAÇÃO GAUSSIANA COM UM SIGMA SORTEADO POR EIXO, KERNEL INTEGRADO POR ERF (RandGaussianSmoothd)
+    # BORDA ESPELHADA: COM A BORDA ZERO DOS AUTORES AS 4 FATIAS DO INLINE (TODAS PERTO DA BORDA) ESCURECERIAM INTEIRAS
+    def smooth(self, img, mask, rng, params):
+        for axis, sigma in enumerate(rng.uniform(*params['sigma'], size=img.ndim)):
+            tail   = int(max(sigma * 4.0, 0.5) + 0.5)
+            x      = np.arange(-tail, tail + 1)
+            kernel = 0.5 * (erf((x + 0.5) / (sigma * np.sqrt(2))) - erf((x - 0.5) / (sigma * np.sqrt(2))))
+            img    = ndimage.correlate1d(img, kernel, axis=axis, mode='reflect')
 
-class Flip(Transform3D):
-    """Flip along a single fixed axis."""
-    def __init__(self, axis=0, **kwargs):
-        super().__init__(**kwargs)
-        self.axis = axis
-
-    def apply(self, img, mask):
-        return np.flip(img, axis=self.axis).copy(), np.flip(mask, axis=self.axis).copy()
-
-
-class Rot90(Transform3D):
-    """Random 90/180/270 degree rotation in the specified plane."""
-    def __init__(self, axes=None, k=None, **kwargs):
-        super().__init__(**kwargs)
-        self.axes = tuple(axes or [1, 2])
-        self.k = k  # None = random choice from 1,2,3
-
-    def apply(self, img, mask):
-        k = self.k if self.k is not None else random.randint(1, 3)
-        return np.rot90(img, k=k, axes=self.axes).copy(), np.rot90(mask, k=k, axes=self.axes).copy()
-
-
-class Transpose(Transform3D):
-    """Random axis swap from a list of axis pairs."""
-    def __init__(self, axes=None, **kwargs):
-        super().__init__(**kwargs)
-        self.axes = axes or [[0, 1], [0, 2], [1, 2]]
-
-    def apply(self, img, mask):
-        pair = random.choice(self.axes)
-        return np.swapaxes(img, pair[0], pair[1]).copy(), np.swapaxes(mask, pair[0], pair[1]).copy()
-
-
-class ElasticDeformation(Transform3D):
-    """
-    Elastic deformation of the 3D volume.
-    alpha: deformation intensity
-    sigma: smoothing of the displacement field
-    """
-    def __init__(self, alpha=4.0, sigma=1.0, order=3, mask_order=0, **kwargs):
-        super().__init__(**kwargs)
-        self.alpha = alpha
-        self.sigma = sigma
-        self.order = order
-        self.mask_order = mask_order
-
-    def apply(self, img, mask):
-        shape = img.shape
-        dx = ndimage.gaussian_filter(np.random.randn(*shape), self.sigma) * self.alpha
-        dy = ndimage.gaussian_filter(np.random.randn(*shape), self.sigma) * self.alpha
-        dz = ndimage.gaussian_filter(np.random.randn(*shape), self.sigma) * self.alpha
-
-        z, y, x = np.meshgrid(
-            np.arange(shape[0]),
-            np.arange(shape[1]),
-            np.arange(shape[2]),
-            indexing='ij'
-        )
-
-        coords = [
-            np.clip(z + dz, 0, shape[0] - 1),
-            np.clip(y + dy, 0, shape[1] - 1),
-            np.clip(x + dx, 0, shape[2] - 1),
-        ]
-
-        img = ndimage.map_coordinates(img, coords, order=self.order, mode='reflect').astype(np.float32)
-        mask = ndimage.map_coordinates(mask, coords, order=self.mask_order, mode='reflect').astype(mask.dtype)
         return img, mask
 
+    # RUÍDO GAUSSIANO ADITIVO COM O DESVIO SORTEADO EM [0, std] (RandGaussianNoised COM sample_std)
+    def noise(self, img, mask, rng, params):
+        std = float(rng.uniform(0, params['std']))
+        return img + rng.standard_normal(img.shape, dtype=np.float32) * np.float32(std), mask
 
-class RandomShift(Transform3D):
-    """Random translation along each axis (in voxels)."""
-    def __init__(self, max_shift=None, fill=0, mask_fill=0, **kwargs):
-        super().__init__(**kwargs)
-        self.max_shift = max_shift or [4, 4, 4]
-        self.fill = fill
-        self.mask_fill = mask_fill
+    # JANELA CENTRADA NUM VOXEL DE UMA CLASSE SORTEADA POR IGUAL ENTRE AS DO TILE, EMPURRADA PARA DENTRO DO TILE
+    # (RandCropByLabelClassesd): É O pos/neg DAS FALHAS PARA N CLASSES, E A FACIES RARA É CENTRO TANTAS VEZES QUANTO A COMUM
+    def crop(self, img, mask, rng, params):
+        size, shape = np.array(params['size']), np.array(img.shape)
+        if np.any(size > shape):
+            raise ValueError(f'recorte {tuple(size)} maior que o tile {tuple(shape)}')
 
-    def apply(self, img, mask):
-        shifts = [random.randint(-s, s) for s in self.max_shift]
-        img = ndimage.shift(img, shifts, order=0, mode='constant', cval=self.fill).astype(np.float32)
-        mask = ndimage.shift(mask, shifts, order=0, mode='constant', cval=self.mask_fill).astype(mask.dtype)
-        return img, mask
+        classes = np.unique(mask)
+        indices = np.flatnonzero(mask == classes[rng.integers(len(classes))])
 
+        center = np.unravel_index(indices[rng.integers(len(indices))], img.shape)
+        start  = np.clip(np.array(center) - size // 2, 0, shape - size)
+        window = tuple(slice(s, s + w) for s, w in zip(start, size))
+        return img[window], mask[window]
 
-class RandomZoom(Transform3D):
-    """Random zoom/scale of the volume."""
-    def __init__(self, low=0.9, high=1.1, order=3, mask_order=0, **kwargs):
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-        self.order = order
-        self.mask_order = mask_order
+    # PREDIÇÃO NA JANELA DO TREINO: TILE DO TAMANHO DA JANELA VAI DIRETO, MAIOR VAI POR JANELA DESLIZANTE (predict_3d.py DOS AUTORES)
+    def infer(self, model, imgs):
+        if self.window is None or tuple(imgs.shape[2:]) == self.window:
+            return model(imgs)
 
-    def apply(self, img, mask):
-        factor = random.uniform(self.low, self.high)
-        shape = img.shape
-        img = ndimage.zoom(img, factor, order=self.order).astype(np.float32)
-        mask = ndimage.zoom(mask, factor, order=self.mask_order).astype(mask.dtype)
-        img = self._crop_or_pad(img, shape)
-        mask = self._crop_or_pad(mask, shape)
-        return img, mask
-
-    def _crop_or_pad(self, vol, target_shape):
-        result = np.zeros(target_shape, dtype=vol.dtype)
-        slices_src = []
-        slices_dst = []
-        for s, t in zip(vol.shape, target_shape):
-            if s >= t:
-                start = (s - t) // 2
-                slices_src.append(slice(start, start + t))
-                slices_dst.append(slice(0, t))
-            else:
-                start = (t - s) // 2
-                slices_src.append(slice(0, s))
-                slices_dst.append(slice(start, start + s))
-        result[tuple(slices_dst)] = vol[tuple(slices_src)]
-        return result
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Intensity transforms (applied to image ONLY)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class GaussianNoise(Transform3D):
-    """Additive Gaussian noise. std can be float or [min, max] for random range."""
-    def __init__(self, std=0.02, mean=0.0, **kwargs):
-        super().__init__(**kwargs)
-        self.std = std
-        self.mean = mean
-
-    def apply(self, img, mask):
-        if isinstance(self.std, (list, tuple)):
-            std = random.uniform(self.std[0], self.std[1])
-        else:
-            std = self.std
-        noise = np.random.normal(self.mean, std, img.shape).astype(np.float32)
-        return img + noise, mask
-
-
-class GaussianBlur(Transform3D):
-    """3D Gaussian blur. sigma can be float or [min, max] for random range."""
-    def __init__(self, sigma=1.0, **kwargs):
-        super().__init__(**kwargs)
-        self.sigma = sigma
-
-    def apply(self, img, mask):
-        if isinstance(self.sigma, (list, tuple)):
-            sigma = random.uniform(self.sigma[0], self.sigma[1])
-        else:
-            sigma = self.sigma
-        return ndimage.gaussian_filter(img, sigma=sigma).astype(np.float32), mask
-
-
-class IntensityScale(Transform3D):
-    """Multiply intensity by a random factor in [low, high]."""
-    def __init__(self, low=0.9, high=1.1, **kwargs):
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-
-    def apply(self, img, mask):
-        factor = random.uniform(self.low, self.high)
-        return (img * factor).astype(np.float32), mask
-
-
-class IntensityShift(Transform3D):
-    """Add a random offset to intensity in [low, high]."""
-    def __init__(self, low=-0.1, high=0.1, **kwargs):
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-
-    def apply(self, img, mask):
-        offset = random.uniform(self.low, self.high)
-        return (img + offset).astype(np.float32), mask
-
-
-class GammaCorrection(Transform3D):
-    """Random gamma correction. Assumes input roughly in [0, 1] range."""
-    def __init__(self, low=0.7, high=1.5, **kwargs):
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-
-    def apply(self, img, mask):
-        gamma = random.uniform(self.low, self.high)
-        mn, mx = img.min(), img.max()
-        if mx - mn < 1e-8:
-            return img, mask
-        normalized = (img - mn) / (mx - mn)
-        corrected = np.power(normalized, gamma)
-        return (corrected * (mx - mn) + mn).astype(np.float32), mask
-
-
-class CoarseDropout(Transform3D):
-    """Randomly erase cubic patches from the volume (image only)."""
-    def __init__(self, n=3, size=None, fill=0, **kwargs):
-        super().__init__(**kwargs)
-        self.n = n
-        self.size = size or [8, 16]  # [min, max] side length
-        self.fill = fill
-
-    def apply(self, img, mask):
-        for _ in range(self.n):
-            if isinstance(self.size, (list, tuple)):
-                s = random.randint(self.size[0], self.size[1])
-            else:
-                s = self.size
-            d = random.randint(0, max(0, img.shape[0] - s))
-            h = random.randint(0, max(0, img.shape[1] - s))
-            w = random.randint(0, max(0, img.shape[2] - s))
-            img[d:d+s, h:h+s, w:w+s] = self.fill
-        return img, mask
-
-
-class Contrast(Transform3D):
-    """Random contrast adjustment around the mean."""
-    def __init__(self, low=0.75, high=1.25, **kwargs):
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-
-    def apply(self, img, mask):
-        factor = random.uniform(self.low, self.high)
-        mean = img.mean()
-        return ((img - mean) * factor + mean).astype(np.float32), mask
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Deterministic transforms (always applied, p=1.0 default)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class Normalize(Transform3D):
-    """Z-score normalization."""
-    def __init__(self, mean=None, std=None, **kwargs):
-        kwargs.setdefault('p', 1.0)
-        super().__init__(**kwargs)
-        self.mean = mean
-        self.std = std
-
-    def apply(self, img, mask):
-        mean = self.mean if self.mean is not None else img.mean()
-        std = self.std if self.std is not None else img.std()
-        if std < 1e-8:
-            return img, mask
-        return ((img - mean) / std).astype(np.float32), mask
-
-
-class Clip(Transform3D):
-    """Clip intensity values."""
-    def __init__(self, low=-3.0, high=3.0, **kwargs):
-        kwargs.setdefault('p', 1.0)
-        super().__init__(**kwargs)
-        self.low = low
-        self.high = high
-
-    def apply(self, img, mask):
-        return np.clip(img, self.low, self.high).astype(np.float32), mask
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Registry + Compose
-# ─────────────────────────────────────────────────────────────────────────────
-
-REGISTRY = {
-    # Spatial
-    "Flip":               Flip,
-    "RandomFlip":         RandomFlip,
-    "Rot90":              Rot90,
-    "Transpose":          Transpose,
-    "ElasticDeformation": ElasticDeformation,
-    "RandomShift":        RandomShift,
-    "RandomZoom":         RandomZoom,
-    # Intensity
-    "GaussianNoise":      GaussianNoise,
-    "GaussianBlur":       GaussianBlur,
-    "IntensityScale":     IntensityScale,
-    "IntensityShift":     IntensityShift,
-    "GammaCorrection":    GammaCorrection,
-    "CoarseDropout":      CoarseDropout,
-    "Contrast":           Contrast,
-    # Deterministic
-    "Normalize":          Normalize,
-    "Clip":               Clip,
-}
-
-
-class Compose:
-    def __init__(self, config):
-        self.transforms = []
-        for item in (config or []):
-            name = item["name"]
-            args = item.get("args", {})
-            cls = REGISTRY.get(name)
-            if cls is None:
-                raise ValueError(f"Unknown transform: '{name}'. Available: {list(REGISTRY.keys())}")
-            self.transforms.append(cls(**args))
-
-    def __call__(self, img, mask):
-        for t in self.transforms:
-            img, mask = t(img, mask)
-        return img, mask
-
-    def __repr__(self):
-        lines = [f"Compose(["]
-        for t in self.transforms:
-            lines.append(f"  {t.__class__.__name__}(p={t.p}),")
-        lines.append("])")
-        return "\n".join(lines)
+        return sliding_window_inference(imgs, self.window, self.batch, model, overlap=self.overlap, mode=self.mode)

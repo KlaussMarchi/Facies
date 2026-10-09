@@ -1,6 +1,5 @@
 {
-    "network": "resaceunet",
-    "multi-gpu": true,
+    "network": "dbrnet",
     "dataset": "facies",
     "img_size": [
         4,
@@ -8,11 +7,18 @@
         256
     ],
     "step": 3,
+    "scaling": "percentile",
     "multiclass": true,
-    "lr": 0.0005,
+    "lr": 0.0001,
     "loss": "dice_focal",
-    "batch_size": 16,
+    "batch_size": 2,
     "scheduler": "plateau",
     "dropout": 0.05,
-    "num_filters": 32
+    "num_filters": 32,
+    "ema": true,
+    "amp": true,
+    "epochs": 200,
+    "patience": 20,
+    "n_trials": 1,
+    "trial": 0
 }

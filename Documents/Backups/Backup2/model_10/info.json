@@ -1,0 +1,57 @@
+{
+    "trainer": {
+        "path": "model_10",
+        "loss": "dice_focal",
+        "scheduler": "plateau",
+        "epochs": 200,
+        "batch_size": 2,
+        "val_iou": 0.8043058514595032,
+        "test_iou": 0.8049980998039246
+    },
+    "processing": {
+        "network": "resaceunet_grva",
+        "dataset": "facies",
+        "img_size": [
+            8,
+            128,
+            128
+        ],
+        "step": 3,
+        "scaling": "percentile",
+        "multiclass": true,
+        "lr": 0.0005,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 16,
+        "n_images": {
+            "total": 11135,
+            "train": 8907,
+            "val": 1114,
+            "test": 1114
+        }
+    },
+    "model": {
+        "network": "resaceunet_grva",
+        "img_size": [
+            8,
+            128,
+            128
+        ],
+        "classes": 6,
+        "channels": 1,
+        "dropout": 0.05,
+        "num_filters": 16,
+        "lr": 0.0005,
+        "deep_supervision": false
+    },
+    "iou": {
+        "0": 0.9358304738998413,
+        "1": 0.6439215540885925,
+        "2": 0.7121745944023132,
+        "3": 0.7913583517074585,
+        "4": 0.7667551636695862,
+        "5": 0.9799482226371765
+    }
+}

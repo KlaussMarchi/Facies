@@ -4,37 +4,45 @@
         "loss": "dice_focal",
         "scheduler": "plateau",
         "epochs": 200,
-        "batch_size": 4,
-        "val_iou": 0.8455222845077515,
-        "test_iou": 0.8336015939712524
+        "batch_size": 2,
+        "economy": true,
+        "ema": true,
+        "trial": 0,
+        "val_iou": 0.9251522421836853,
+        "test_iou": 0.9120391607284546
     },
     "processing": {
-        "network": "resaceunet",
+        "network": "nru_net",
         "dataset": "facies",
         "img_size": [
-            16,
+            4,
             256,
             256
         ],
         "step": 3,
+        "scaling": "percentile",
         "multiclass": true,
-        "lr": 0.0005,
+        "lr": 0.0001,
         "loss": "dice_focal",
-        "batch_size": 4,
+        "batch_size": 2,
         "scheduler": "plateau",
         "dropout": 0.05,
         "num_filters": 32,
+        "ema": true,
+        "n_trials": 1,
+        "epochs": 200,
+        "trial": 0,
         "n_images": {
-            "total": 1782,
-            "train": 1424,
-            "val": 179,
-            "test": 179
+            "total": 7074,
+            "train": 5658,
+            "val": 708,
+            "test": 708
         }
     },
     "model": {
-        "network": "resaceunet",
+        "network": "nru_net",
         "img_size": [
-            16,
+            4,
             256,
             256
         ],
@@ -42,15 +50,24 @@
         "channels": 1,
         "dropout": 0.05,
         "num_filters": 32,
-        "lr": 0.0005,
+        "lr": 0.0001,
         "deep_supervision": false
     },
     "iou": {
-        "0": 0.9594271183013916,
-        "1": 0.7075490951538086,
-        "2": 0.7304294109344482,
-        "3": 0.855396568775177,
-        "4": 0.7612399458885193,
-        "5": 0.9875673651695251
+        "0": 0.9769652485847473,
+        "1": 0.8389536142349243,
+        "2": 0.8740096688270569,
+        "3": 0.9054250121116638,
+        "4": 0.881992757320404,
+        "5": 0.994902491569519
+    },
+    "marlim_iou": {
+        "0": 0.984684657189824,
+        "1": 0.9003108045241006,
+        "2": 0.9281860072062934,
+        "3": 0.9448305123612475,
+        "4": 0.9195851625201649,
+        "5": 0.9922379443448439,
+        "mean": 0.944972514691079
     }
 }
