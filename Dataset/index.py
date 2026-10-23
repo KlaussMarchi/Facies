@@ -3,7 +3,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from tqdm import tqdm
-import glob, os, shutil
+import glob, os, re, shutil
+
+
+# ARQUIVOS DO VOLUME (SÍSMICA, RÓTULO) DE CADA DATASET EM Dataset/<dataset>/files/, LIDOS PELO Format E PELO 3 - Predict
+VOLUMES = {
+    'marlim': ('marlim_norm_perc_1-99_cut.npy', 'npy_multiclass_cut.npy'),
+    'f3':     ('f3_seismic.npy', 'f3_masks.npy'),
+}
+
+# REGIÃO DO DADO REAL DE CADA VOLUME ((início, fim) POR EIXO), A ÚNICA QUE O 3 - Predict MEDE; SEM ENTRADA É O VOLUME INTEIRO.
+# OS PATCHES DO F3 COBREM O VOLUME (601, 255, 901) DO BENCHMARK DE ALAUDAH ET AL. (2019) COM BORDA REFLETIDA DE 1 INLINE,
+# 16 AMOSTRAS E 16 XLINES DE CADA LADO: A BORDA REPETE VOXELS DE DENTRO E NÃO ENTRA NA COMPARAÇÃO COM OS ESTUDOS
+VALID = {
+    'f3': ((1, 602), (16, 271), (16, 917)),
+}
 
 
 # ARQUIVOS DE UMA PASTA (OU PADRÃO GLOB), EM CAMINHO ABSOLUTO E ORDEM ALFABÉTICA
@@ -60,7 +74,7 @@ def showTile(img=None, mask=None, save=None):
 
 # ESCALONAMENTO DOS TILES NO FORMAT (E DOS BLOCOS DO VOLUME NO 3 - Predict), ESCOLHIDO PELO scaling DO info.json E GRAVADO NA COLUNA scaling DO DataBase.csv
 class Normalization:
-    OPTIONS = ('percentile', 'normalize', 'standardize')
+    OPTIONS = ('percentile', 'normalize', 'standardize', None)
     DEFAULT = 'percentile'                 # O VOLUME COMO VEM: O marlim_norm_perc_1-99_cut.npy JÁ ESTÁ NO p01/p99 DO BLOCO INTEIRO, EM [0, 1]
     UNIT    = ('normalize', 'percentile')  # OS QUE DEIXAM O TILE EM [0, 1]
 
@@ -71,7 +85,7 @@ class Normalization:
         self.scaling = scaling
 
     # O PERCENTIL DO CONJUNTO JÁ VEM APLICADO NO ARQUIVO: O TILE PASSA COMO ESTÁ. Refazer o p01/p99 sobre o volume já cortado
-    # mudaria o dado, e não há volume cru para o null das falhas
+    # mudaria o dado. None (null no info.json) É SEM NENHUM TRATAMENTO: O DADO JÁ VEM PRONTO, COMO OS PATCHES DO F3
     def __call__(self, img):
         if self.scaling == 'normalize':
             return (img - np.min(img)) / (np.max(img) - np.min(img))
@@ -82,7 +96,7 @@ class Normalization:
         return img
 
     def __repr__(self):
-        names = {'percentile': 'o volume como vem, já no p01/p99 do bloco inteiro em [0, 1]', 'normalize': 'min-max de cada tile para [0, 1]', 'standardize': 'padronização de cada tile (média 0, desvio 1)'}
+        names = {'percentile': 'o volume como vem, já no p01/p99 do bloco inteiro em [0, 1]', 'normalize': 'min-max de cada tile para [0, 1]', 'standardize': 'padronização de cada tile (média 0, desvio 1)', None: 'sem nenhum tratamento, o dado como vem'}
         return f'Normalization({self.scaling!r}): {names[self.scaling]}'
 
     # ESCALONAMENTO DE UM DataBase.csv: SEM A COLUNA É O DEFAULT, CÉLULA VAZIA É None
@@ -142,3 +156,61 @@ class TilesBuilder:
                     rows.append(data)
                     k += 1
         return rows
+
+
+# REMONTA O VOLUME DOS PATCHES BRUTOS patch_dDDDD_hHHHH_wWWWW.dat (float32 NO FORMATO size, SÍSMICA E RÓTULO COM O MESMO NOME):
+# O PATCH i DE UM EIXO COMEÇA EM i * stride, MENOS O ÚLTIMO, QUE ENCOSTA NO FIM DO VOLUME E TEM O INÍCIO ACHADO PELA SOBREPOSIÇÃO
+# COM O PENÚLTIMO; build CONFERE QUE TODA SOBREPOSIÇÃO REPETE O MESMO DADO (diff, mismatch) E QUE NENHUM VOXEL FICOU VAZIO (missing)
+class PatchAssembler:
+    PATTERN = re.compile(r'patch_d(\d+)_h(\d+)_w(\d+)\.dat$')
+
+    def __init__(self, seismic_dir, mask_dir, size=(4, 64, 64), stride=(2, 32, 32)):
+        self.seismic_dir = seismic_dir
+        self.mask_dir    = mask_dir
+        self.size        = tuple(size)
+        self.stride      = tuple(stride)
+        self.index  = {tuple(int(v) for v in self.PATTERN.search(name).groups()): name for name in sorted(os.listdir(seismic_dir)) if self.PATTERN.search(name)}
+        self.counts = tuple(max(key[axis] for key in self.index) + 1 for axis in range(3))
+        self.starts = [self.getStarts(axis) for axis in range(3)]
+        self.shape  = tuple(self.starts[axis][-1] + self.size[axis] for axis in range(3))
+
+    def load(self, folder, key):
+        return np.fromfile(os.path.join(folder, self.index[key]), dtype=np.float32).reshape(self.size)
+
+    # INÍCIOS DE UM EIXO: A GRADE DO stride E O ÚLTIMO NO DESLOCAMENTO EM QUE ELE REPETE O FIM DO PENÚLTIMO
+    def getStarts(self, axis):
+        n, size, stride = self.counts[axis], self.size[axis], self.stride[axis]
+        starts = [i * stride for i in range(n)]
+        if n < 2:
+            return starts
+
+        a = self.load(self.seismic_dir, tuple(n - 2 if j == axis else 0 for j in range(3)))
+        b = self.load(self.seismic_dir, tuple(n - 1 if j == axis else 0 for j in range(3)))
+        shifts = [s for s in range(1, size) if np.array_equal(np.take(a, range(s, size), axis=axis), np.take(b, range(size - s), axis=axis))]
+        if not shifts:
+            raise ValueError(f'eixo {axis}: o último patch não repete o fim do penúltimo em nenhum deslocamento')
+
+        starts[-1] = starts[-2] + (stride if stride in shifts else shifts[0])
+        return starts
+
+    def build(self):
+        seismic = np.zeros(self.shape, dtype=np.float32)
+        masks   = np.zeros(self.shape, dtype=np.uint8)
+        filled  = np.zeros(self.shape, dtype=bool)
+        self.diff, self.mismatch = 0.0, 0
+
+        for key, name in tqdm(self.index.items()):
+            s   = tuple(slice(self.starts[axis][key[axis]], self.starts[axis][key[axis]] + self.size[axis]) for axis in range(3))
+            img = self.load(self.seismic_dir, key)
+            msk = np.rint(self.load(self.mask_dir, key)).astype(np.uint8)
+
+            seen = filled[s]
+            self.diff      = max(self.diff, float(np.abs(seismic[s][seen] - img[seen]).max(initial=0)))
+            self.mismatch += int(np.count_nonzero(masks[s][seen] != msk[seen]))
+            seismic[s], masks[s], filled[s] = img, msk, True
+
+        self.missing = int(np.count_nonzero(~filled))
+        return seismic, masks
+
+    def __repr__(self):
+        return f'PatchAssembler: {len(self.index)} patches {self.size} em {self.counts}, passo {self.stride}, volume {self.shape}'

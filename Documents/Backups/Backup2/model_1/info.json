@@ -10,7 +10,7 @@
     },
     "processing": {
         "network": "resaceunet_grva",
-        "dataset": "facies",
+        "dataset": "marlim",
         "img_size": [
             4,
             256,
@@ -55,7 +55,7 @@
         "5": 0.9818085432052612,
         "mean": 0.8394744992256165
     },
-    "marlim_iou": {
+    "block_iou": {
         "0": 0.9621141196840735,
         "1": 0.7796714346097204,
         "2": 0.8274420335625197,

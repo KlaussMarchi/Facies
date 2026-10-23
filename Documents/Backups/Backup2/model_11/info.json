@@ -10,7 +10,7 @@
     },
     "processing": {
         "network": "resaceunet_grva",
-        "dataset": "facies",
+        "dataset": "marlim",
         "img_size": [
             32,
             128,

@@ -12,7 +12,7 @@
     "processing": {
         "network": "resaceunet_grva",
         "multi-gpu": true,
-        "dataset": "facies",
+        "dataset": "marlim",
         "img_size": [
             4,
             256,

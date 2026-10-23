@@ -32,10 +32,17 @@ Tudo roda no python do `base` do conda (torch 2.7.1+cu128, monai 1.5.2, torchmet
 
 Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anterior gravou:
 
-1. **`Dataset/facies/files/`** — `marlim_norm_perc_1-99_cut.npy`, a sísmica float32 `(3137, 552, 2050)` =
+1. **`Dataset/marlim/files/`** (dataset `marlim`, que antes se chamava `facies`) — `marlim_norm_perc_1-99_cut.npy`, a
+   sísmica float32 `(3137, 552, 2050)` =
    `(inline, z, xline)` já no p01/p99 do bloco em `[0, 1]`, e `npy_multiclass_cut.npy`, o rótulo uint8 com as classes
    0–5. A classe 0 é uma fácies como as outras, **não é fundo**.
-2. **`Dataset/facies/Format.ipynb`.** Corta um bloco de `img_size[0]` inlines a cada `step` (padrão 3) em tiles
+   **`Dataset/f3/files/`** — os patches brutos do F3 (`seismics/` e `masks/`, `patch_dDDDD_hHHHH_wWWWW.dat` float32
+   `(4, 64, 64)`, sobrepostos pela metade); o `Format` do `f3` remonta com o `PatchAssembler` o volume `(603, 287, 933)`
+   em `f3_seismic.npy`/`f3_masks.npy` e corta como o do `marlim`. Esse volume é o `(601, 255, 901)` do benchmark de
+   Alaudah et al. (2019) com borda refletida (1 inline, 16 amostras e 16 xlines de cada lado). Os nomes dos volumes de
+   cada dataset ficam no `VOLUMES` do `Dataset/index.py` e a região do dado real (sem a borda) no `VALID`, os dois lidos
+   pelo `3 - Predict`.
+2. **`Dataset/marlim/Format.ipynb`.** Corta um bloco de `img_size[0]` inlines a cada `step` (padrão 3) em tiles
    `img_size`, com a borda do volume preenchida por reflexão (o rótulo pela borda), e grava `tiles/{images,masks}` e o
    `DataBase.csv` (`img_path`/`mask_path` absolutos, `shape`, estatísticas, `msk_max`, `step`, `normalize`). Com
    `"normalize": true` (padrão) o tile é o volume como vem; com `false` é a padronização de cada tile (média 0, desvio 1,
@@ -43,8 +50,9 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
    param com erro se ela não bater com a rodada. Também reescreve `Task/info.json` com o nome do dataset.
 3. **`Task/info.json`** é a configuração única da rodada (`network`, `dataset`, `img_size`, `step`, `lr`, `loss`,
    `batch_size`, `scheduler`, `dropout`, `num_filters`, `ema`, `n_trials`, opcionais `epochs`, `patience`, `amp`,
-   `normalize`, `deep_supervision` e `augmentations`; `multiclass` é só informativo), lida como `OPTIONS`.
-4. **`Model/1 - Model.ipynb`** — o treino. Split fixo (`random_state=42`) de 80/10/10 dos tiles, `classes` =
+   `normalize`, `test_size`, `deep_supervision` e `augmentations`; `multiclass` é só informativo), lida como `OPTIONS`.
+4. **`Model/1 - Model.ipynb`** — o treino. Split fixo (`random_state=42`) de 80/10/10 dos tiles (o teste é o
+   `test_size` do `info.json`, padrão 0.1; com `0` não há teste, os tiles ficam 90/10 e `test_iou`/`iou` ficam `None`), `classes` =
    `msk_max` + 1, `CustomDataset`, `Trainer` (clip de gradiente, `plateau` = `ReduceLROnPlateau` por época, `cosine` =
    aquecimento 1e-6 → `lr` em 10 épocas e cosseno até 1e-7 a cada batch (a agenda da ResACEUnet), `ModelEMA` do
    `Model/EMA/` quando `ema` é true, deep supervision com pesos 1/0.5/0.25 quando a rede devolve lista, progresso
@@ -54,16 +62,23 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
    rodada), `division` guarda o split (`val_size`, `test_size`, `step`, `n_images`, e `k_fold` no CV), `model` os
    argumentos da rede (o `model.img_size` vem do `shape` do `DataBase.csv` ou, com `crop`, da janela do recorte) e `iou`
    o IoU de cada classe no teste. **`Model/0 - Model_CV.ipynb`** é o mesmo treino em K dobras (salva a melhor).
-5. **`Model/2 - Compare.ipynb`** junta todo `info.json` da pasta `BACKUP` numa tabela (o `marlim_iou` entra como a
-   média) e compara variações com a `VariationAnalysis` (média±std entre trials).
-6. **`Model/3 - Predict.ipynb`** — pega o último modelo de `BASE_PATH` (ou o `modelId` fixado), refaz o split de teste
-   pelo `division` (confere `n_images`, `normalize` e `step`) e mede pela matriz de confusão `classes × classes` dos
-   voxels (precisão, recall, IoU e F1 por classe; a média do IoU é o `test_iou`). Depois prediz o **volume inteiro** em
-   blocos do tile, pulando os inlines que viraram tile, com a mesma normalização, o mesmo `amp` e a mesma predição do
-   treino (`Transforms.infer`), e grava `marlim_iou` no `info.json`, `marlim_classes.png` e `views/`.
-7. **`Documents/Backups/Backup1|Backup2/model_N/`** guardam campanhas antigas no formato de `Model/Backup` (de antes do
-   `division`: o `3 - Predict` lê `n_images`/`step` do `processing` e usa o `test_size` 0.1 de então); os notebooks
-   trocam a pasta pelo `BACKUP`/`BASE_PATH`.
+5. **`Model/2 - Compare.ipynb`** junta todo `info.json` da pasta `BACKUP` numa tabela (o `block_iou` entra como a
+   média e o `block_metrics` pelas médias, com prefixo `block_`) e compara variações com a `VariationAnalysis` (média±std entre trials).
+6. **`Model/3 - Predict.ipynb`** — pega o último modelo de `BASE_PATH` (ou o `modelId` fixado) e avalia sempre no dataset
+   em que ele treinou. Refaz o split de teste pelo `division` (confere `n_images`, `normalize` e `step`) e mede pela
+   matriz de confusão `classes × classes` dos voxels (PA, MCA, IoU, FWIU e F1 por classe; a média do IoU é o
+   `test_iou`), salva em `confusion_matrix.png` (em inglês, `Real` × `Predicted`); com `test_size` 0 essa parte é
+   pulada. Depois prediz o **bloco inteiro** (o volume do dataset) em blocos do tile, pulando os inlines que viraram
+   tile, com a mesma normalização, o mesmo `amp` e a mesma predição do treino (`Transforms.infer`). Mede só a região
+   `VALID` do dataset e grava no `info.json` o `block_iou` e o `block_metrics` (`pa`, `mca`, `miou`, `fwiu`, `mf1` e,
+   por classe, `class_accuracy`, `precision`, `iou` e `f1`: as métricas dos estudos de `Estudos/COMPARACAO.md`), além
+   de `block_classes.png`, `block_confusion_matrix.png` e `views/` (no `volume_pred.png` a legenda traz o IoU de cada
+   classe no bloco e o título o mIoU). (Antes as chaves eram `marlim_*`; os backups foram
+   migrados.) Com `SAVE_PRED = True` prediz também os inlines de treino e salva o volume completo em `predicted.npy` no
+   backup (uint8, mesmo shape e classes do rótulo do dataset; ~3,5 GB no `marlim`); a métrica continua só fora do `step`.
+7. **`Documents/Backups/Backup1|Backup2|Backup3/model_N/`** guardam campanhas antigas do `marlim` no formato de
+   `Model/Backup` (as de antes do `division`: o `3 - Predict` lê `n_images`/`step` do `processing` e usa o `test_size`
+   0.1 de então); os notebooks trocam a pasta pelo `BACKUP`/`BASE_PATH`.
 
 ## Convenções que atravessam o repositório
 
