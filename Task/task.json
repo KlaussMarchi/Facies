@@ -1,6 +1,70 @@
 [
     {
-        "network": "resaceunet_grva",
+        "network": "dbrnet",
+        "dataset": "marlim",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 10,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0005,
+        "loss": "dice_focal",
+        "batch_size": 4,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": false,
+        "amp": false,
+        "epochs": 200,
+        "patience": 15,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "marlim",
+        "img_size": [
+            4,
+            256,
+            256
+        ],
+        "step": 10,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0005,
+        "loss": "dice_focal",
+        "batch_size": 4,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": false,
+        "amp": false,
+        "epochs": 200,
+        "patience": 15,
+        "test_size": 0.1,
+        "n_trials": 1,
+        "augmentations": {
+            "rotate90": {
+                "axes": [
+                    1,
+                    2
+                ],
+                "prob": 0.75
+            },
+            "flip": {
+                "axes": [
+                    2
+                ],
+                "prob": 0.5
+            },
+            "n_aug": 2
+        }
+    },
+    {
+        "network": "dbrnet",
         "dataset": "f3",
         "img_size": [
             4,
@@ -20,6 +84,175 @@
         "amp": true,
         "epochs": 200,
         "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            64,
+            64
+        ],
+        "step": 4,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            64,
+            64
+        ],
+        "step": 5,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            64,
+            64
+        ],
+        "step": 10,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            128,
+            128
+        ],
+        "step": 3,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            128,
+            128
+        ],
+        "step": 4,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            128,
+            128
+        ],
+        "step": 5,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
+        "n_trials": 1
+    },
+    {
+        "network": "dbrnet",
+        "dataset": "f3",
+        "img_size": [
+            4,
+            128,
+            128
+        ],
+        "step": 10,
+        "scaling": null,
+        "multiclass": true,
+        "lr": 0.0001,
+        "loss": "dice_focal",
+        "batch_size": 2,
+        "scheduler": "plateau",
+        "dropout": 0.05,
+        "num_filters": 32,
+        "ema": true,
+        "amp": true,
+        "epochs": 200,
+        "patience": 20,
+        "test_size": 0.1,
         "n_trials": 1
     }
 ]

@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline de Fácies</title>
+<style>
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --ink: #1d1f23; --muted: #5d636e; --line: #d9d6cf;
+  --accent: #2f5fb3; --train: #3b82c4; --val: #e0a526; --test: #c8483b; --unseen: #5aa469;
+  --pad: #b9b4aa; --ok: #2e8b57; --warn: #c88a12; --bad: #c0392b; --code: #f1efe9;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --surface: #1d2025; --ink: #e8e6e1; --muted: #a1a6b0; --line: #3a3e46;
+    --accent: #7aa7f0; --train: #5c9fe0; --val: #f0bd4a; --test: #e86a5c; --unseen: #74c486;
+    --pad: #6c6860; --ok: #5cc28a; --warn: #f0b440; --bad: #ef6b5d; --code: #262a31;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --surface: #1d2025; --ink: #e8e6e1; --muted: #a1a6b0; --line: #3a3e46;
+  --accent: #7aa7f0; --train: #5c9fe0; --val: #f0bd4a; --test: #e86a5c; --unseen: #74c486;
+  --pad: #6c6860; --ok: #5cc28a; --warn: #f0b440; --bad: #ef6b5d; --code: #262a31;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 2rem; margin: 0 0 4px; line-height: 1.2; }
+h2 { font-size: 1.4rem; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.1rem; margin: 28px 0 8px; }
+p, li { max-width: 72ch; }
+.lead { color: var(--muted); font-size: 1.05rem; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .9em; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: .85rem; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+nav.toc { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px; margin: 24px 0; }
+nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+nav.toc a { color: var(--accent); text-decoration: none; }
+@media (max-width: 640px) { nav.toc ol { columns: 1; } }
+figure { margin: 20px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { color: var(--muted); font-size: .9rem; margin-top: 8px; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; background: var(--surface); }
+th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code); font-weight: 600; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.verdict { border-left: 4px solid var(--line); background: var(--surface); padding: 10px 14px; margin: 12px 0; border-radius: 0 8px 8px 0; }
+.verdict.ok { border-color: var(--ok); }
+.verdict.warn { border-color: var(--warn); }
+.verdict.bad { border-color: var(--bad); }
+.tag { display: inline-block; font-size: .75rem; font-weight: 700; letter-spacing: .03em; padding: 1px 8px; border-radius: 99px; color: #fff; margin-right: 6px; vertical-align: 1px; }
+.tag.ok { background: var(--ok); } .tag.warn { background: var(--warn); } .tag.bad { background: var(--bad); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .85rem; color: var(--muted); margin-top: 6px; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+/* CLASSES DO SVG */
+.s-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.s-acc { fill: none; stroke: var(--accent); stroke-width: 2; }
+.s-txt { fill: var(--ink); font: 13px system-ui, sans-serif; }
+.s-sm { fill: var(--muted); font: 11px system-ui, sans-serif; }
+.s-b { font-weight: 700; }
+.s-arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#arr); }
+.s-line { stroke: var(--line); stroke-width: 1; fill: none; }
+.f-train { fill: var(--train); } .f-val { fill: var(--val); } .f-test { fill: var(--test); }
+.f-unseen { fill: var(--unseen); } .f-pad { fill: url(#hatch); } .f-real { fill: var(--code); }
+.f-muted { fill: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Pipeline de fácies: do volume ao <code>block_iou</code></h1>
+<p class="lead">Como o volume entra, como vira tiles, como é dividido, treinado e remontado de volta, e uma auditoria de cada etapa em busca de vazamento de dados (data leakage). Os números são do código e dos dados atuais (<code>Dataset/*/DataBase.csv</code>, 05/11/2026).</p>
+
+<nav class="toc">
+<ol>
+<li><a href="#fluxo">Fluxo geral</a></li>
+<li><a href="#dados">Os volumes</a></li>
+<li><a href="#step">O <code>step</code>: quais inlines viram tile</a></li>
+<li><a href="#tiles">Como cada bloco vira tiles</a></li>
+<li><a href="#split">Separação treino / validação / teste</a></li>
+<li><a href="#treino">Treino</a></li>
+<li><a href="#teste">Avaliação nos tiles de teste</a></li>
+<li><a href="#bloco">Remontagem do bloco e <code>block_iou</code></a></li>
+<li><a href="#pred">O <code>predicted.npy</code></a></li>
+<li><a href="#auditoria">Auditoria: o que está certo e o que não está</a></li>
+<li><a href="#correcoes">Correções sugeridas</a></li>
+<li><a href="#solucoes">Soluções em detalhe</a></li>
+</ol>
+</nav>
+
+<!-- ====================================================================== -->
+<h2 id="fluxo">1. Fluxo geral</h2>
+<p>Os estágios só trocam <strong>arquivos</strong>: cada notebook lê o que o anterior gravou. A configuração da rodada é sempre o <code>Task/info.json</code>, e o <code>Task/index.py</code> encadeia tudo via papermill.</p>
+
+<figure>
+<svg viewBox="0 0 940 430" role="img" aria-label="Fluxograma do pipeline">
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--muted)"/></marker>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--code)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--pad)" stroke-width="2.5"/></pattern>
+</defs>
+<!-- linha 1 -->
+<rect class="s-box" x="10" y="20" width="200" height="110" rx="10"/>
+<text class="s-txt s-b" x="24" y="44">Volume bruto</text>
+<text class="s-sm" x="24" y="64">Dataset/&lt;ds&gt;/files/</text>
+<text class="s-sm" x="24" y="82">sísmica float32 [0,1]</text>
+<text class="s-sm" x="24" y="98">rótulo uint8 (classes 0–5)</text>
+<text class="s-sm" x="24" y="114">(inline, z, xline)</text>
+
+<rect class="s-box" x="250" y="20" width="200" height="110" rx="10"/>
+<text class="s-txt s-b" x="264" y="44">Format.ipynb</text>
+<text class="s-sm" x="264" y="64">TilesBuilder (Dataset/index.py)</text>
+<text class="s-sm" x="264" y="82">1 bloco de 4 inlines</text>
+<text class="s-sm" x="264" y="98">a cada step blocos</text>
+<text class="s-sm" x="264" y="114">→ tiles + borda refletida</text>
+
+<rect class="s-box" x="490" y="20" width="200" height="110" rx="10"/>
+<text class="s-txt s-b" x="504" y="44">tiles/ + DataBase.csv</text>
+<text class="s-sm" x="504" y="64">images/img_NNNNN.npy</text>
+<text class="s-sm" x="504" y="82">masks/img_NNNNN.npy</text>
+<text class="s-sm" x="504" y="98">shape, step, scaling,</text>
+<text class="s-sm" x="504" y="114">msk_max, estatísticas</text>
+
+<rect class="s-box" x="730" y="20" width="200" height="110" rx="10"/>
+<text class="s-txt s-b" x="744" y="44">1 - Model.ipynb</text>
+<text class="s-sm" x="744" y="64">split 80/10/10 dos tiles</text>
+<text class="s-sm" x="744" y="82">(random_state=42)</text>
+<text class="s-sm" x="744" y="98">treino + early stopping</text>
+<text class="s-sm" x="744" y="114">no val_iou</text>
+
+<path class="s-arrow" d="M210,75 H246"/>
+<path class="s-arrow" d="M450,75 H486"/>
+<path class="s-arrow" d="M690,75 H726"/>
+
+<!-- linha 2 -->
+<rect class="s-box" x="730" y="180" width="200" height="100" rx="10"/>
+<text class="s-txt s-b" x="744" y="204">Model/Backup/model_N/</text>
+<text class="s-sm" x="744" y="224">model.pth, info.json</text>
+<text class="s-sm" x="744" y="242">(processing, division,</text>
+<text class="s-sm" x="744" y="260">model, test_iou)</text>
+
+<rect class="s-box" x="370" y="180" width="320" height="100" rx="10"/>
+<text class="s-txt s-b" x="384" y="204">3 - Predict.ipynb</text>
+<text class="s-sm" x="384" y="224">(a) refaz o split → teste nos tiles: test_iou</text>
+<text class="s-sm" x="384" y="242">(b) prediz o volume inteiro em blocos de 4 inlines,</text>
+<text class="s-sm" x="384" y="260">mede só os blocos fora do step: block_iou</text>
+
+<rect class="s-box" x="10" y="180" width="320" height="100" rx="10"/>
+<text class="s-txt s-b" x="24" y="204">Saídas no backup</text>
+<text class="s-sm" x="24" y="224">info.json: test_iou, test_metrics, block_iou,</text>
+<text class="s-sm" x="24" y="242">block_metrics · confusion_matrix.png ·</text>
+<text class="s-sm" x="24" y="260">block_*.png · views/ · predicted.npy (opcional)</text>
+
+<path class="s-arrow" d="M830,130 V176"/>
+<path class="s-arrow" d="M730,230 H694"/>
+<path class="s-arrow" d="M370,230 H334"/>
+<!-- leitura do volume pelo predict -->
+<path class="s-arrow" d="M110,130 V150 H530 V176" stroke-dasharray="5 4"/>
+<text class="s-sm" x="150" y="146">o 3 - Predict relê o volume bruto inteiro (VOLUMES do Dataset/index.py)</text>
+
+<!-- linha 3: config -->
+<rect class="s-box" x="10" y="330" width="920" height="80" rx="10"/>
+<text class="s-txt s-b" x="24" y="354">Task/task.json → Task/index.py</text>
+<text class="s-sm" x="24" y="374">para cada rodada: grava Task/info.json · roda o Format só se o DataBase.csv não bate com img_size/step/scaling ·</text>
+<text class="s-sm" x="24" y="392">para cada trial (semente 42 + trial): 1 - Model e, se terminou, 3 - Predict no modelo recém-salvo</text>
+</svg>
+<figcaption>Setas cheias: arquivo gravado por um estágio e lido pelo próximo. Tracejada: o 3 - Predict volta ao volume bruto para predizer o bloco inteiro.</figcaption>
+</figure>
+
+<!-- ====================================================================== -->
+<h2 id="dados">2. Os volumes</h2>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>marlim</th><th>f3</th></tr>
+<tr><td>Arquivos</td><td><code>marlim_norm_perc_1-99_cut.npy</code><br><code>npy_multiclass_cut.npy</code></td><td><code>f3_seismic.npy</code><br><code>f3_masks.npy</code></td></tr>
+<tr><td>Shape <code>(inline, z, xline)</code></td><td class="num">(3137, 552, 2050)</td><td class="num">(601, 255, 901)</td></tr>
+<tr><td>Escala</td><td>p01/p99 do bloco inteiro, em [0, 1]</td><td>benchmark de Alaudah et al. (2019), em [0, 1]</td></tr>
+<tr><td>Classes</td><td>0–5 (a 0 é fácies, não fundo)</td><td>0–5</td></tr>
+<tr><td>Tile atual (<code>DataBase.csv</code>)</td><td class="num">(4, 256, 256)</td><td class="num">(4, 128, 128)</td></tr>
+<tr><td><code>step</code> atual</td><td class="num">10</td><td class="num">3</td></tr>
+<tr><td><code>scaling</code> atual</td><td><code>null</code> (dado como vem)</td><td><code>null</code></td></tr>
+</table>
+</div>
+<p>O F3 chega em patches <code>(4, 64, 64)</code> sobrepostos pela metade. O <code>Format</code> do f3 remonta o volume com o <code>PatchAssembler</code> (exigindo <code>diff = mismatch = missing = 0</code>) e só então corta como o do marlim. Isso é correto: treinar direto nos patches deixaria o mesmo voxel em até 8 patches, que poderiam cair em treino e teste ao mesmo tempo.</p>
+
+<!-- ====================================================================== -->
+<h2 id="step">3. O <code>step</code>: quais inlines viram tile</h2>
+<p>O volume é visto como uma sequência de <strong>blocos</strong> de <code>img_size[0] = 4</code> inlines: o bloco <code>k</code> são os inlines <code>[4k, 4k+4)</code>. Só um bloco a cada <code>step</code> vira tile; todos os outros ficam para a avaliação no bloco.</p>
+
+<pre><code># Format (TilesBuilder.build)                     # 3 - Predict (PredictBuilder.update)
+for z in range(0, N_inline, 4 * step):            for z in range(0, N_inline, 4):
+    corta seismic[z:z+4] em tiles                     train = (z // 4) % step == 0   # mesmo bloco do Format</code></pre>
+<p>As duas regras são a mesma: <code>z = 4·step·j</code> ⇔ <code>z//4 = step·j</code> ⇔ <code>(z//4) % step == 0</code>. O <code>3 - Predict</code> confere ainda que o <code>step</code> do <code>DataBase.csv</code> é o do modelo e para com erro se não for.</p>
+
+<figure>
+<svg viewBox="0 0 940 210" role="img" aria-label="Blocos de inlines e o step">
+<text class="s-txt s-b" x="10" y="20">marlim, step = 10: um bloco de 4 inlines a cada 40</text>
+<!-- 30 blocos desenhados (120 inlines) -->
+<g transform="translate(10,32)">
+  <rect class="f-unseen" x="0" y="0" width="900" height="34" opacity=".25"/>
+  <rect class="f-train" x="0" y="0" width="30" height="34"/>
+  <rect class="f-train" x="300" y="0" width="30" height="34"/>
+  <rect class="f-train" x="600" y="0" width="30" height="34"/>
+  <g class="s-line">
+    <path d="M30,0V34 M60,0V34 M90,0V34 M120,0V34 M150,0V34 M180,0V34 M210,0V34 M240,0V34 M270,0V34 M300,0V34 M330,0V34 M360,0V34 M390,0V34 M420,0V34 M450,0V34 M480,0V34 M510,0V34 M540,0V34 M570,0V34 M600,0V34 M630,0V34 M660,0V34 M690,0V34 M720,0V34 M750,0V34 M780,0V34 M810,0V34 M840,0V34 M870,0V34"/>
+  </g>
+  <text class="s-sm" x="0" y="50">k=0</text><text class="s-sm" x="300" y="50">k=10</text><text class="s-sm" x="600" y="50">k=20</text>
+  <text class="s-sm" x="0" y="64">inl 0–3</text><text class="s-sm" x="300" y="64">inl 40–43</text><text class="s-sm" x="600" y="64">inl 80–83</text>
+  <path class="s-acc" d="M30,-4 H300" stroke-dasharray="3 3"/>
+  <text class="s-sm" x="110" y="-8">36 inlines nunca vistos</text>
+</g>
+<text class="s-txt s-b" x="10" y="130">f3, step = 3: um bloco de 4 inlines a cada 12</text>
+<g transform="translate(10,142)">
+  <rect class="f-unseen" x="0" y="0" width="900" height="34" opacity=".25"/>
+  <rect class="f-train" x="0" y="0" width="30" height="34"/><rect class="f-train" x="90" y="0" width="30" height="34"/><rect class="f-train" x="180" y="0" width="30" height="34"/><rect class="f-train" x="270" y="0" width="30" height="34"/><rect class="f-train" x="360" y="0" width="30" height="34"/><rect class="f-train" x="450" y="0" width="30" height="34"/><rect class="f-train" x="540" y="0" width="30" height="34"/><rect class="f-train" x="630" y="0" width="30" height="34"/><rect class="f-train" x="720" y="0" width="30" height="34"/><rect class="f-train" x="810" y="0" width="30" height="34"/>
+  <g class="s-line"><path d="M30,0V34 M60,0V34 M90,0V34 M120,0V34 M150,0V34 M180,0V34 M210,0V34 M240,0V34 M270,0V34 M300,0V34 M330,0V34 M360,0V34 M390,0V34 M420,0V34 M450,0V34 M480,0V34 M510,0V34 M540,0V34 M570,0V34 M600,0V34 M630,0V34 M660,0V34 M690,0V34 M720,0V34 M750,0V34 M780,0V34 M810,0V34 M840,0V34 M870,0V34"/></g>
+  <text class="s-sm" x="0" y="50">inl 0–3</text><text class="s-sm" x="90" y="50">inl 12–15</text>
+</g>
+</svg>
+<div class="legend"><span style="--c:var(--train)">bloco que vira tile (treino, validação ou teste)</span><span style="--c:var(--unseen)">bloco nunca visto: entra no <code>block_iou</code></span></div>
+<figcaption>Cada retângulo é um bloco de 4 inlines. Os blocos azuis viram tile no Format; o split 80/10/10 acontece depois, só entre os tiles deles.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+<tr><th></th><th>marlim (step 10)</th><th>f3 (step 3)</th></tr>
+<tr><td>Blocos que viram tile</td><td class="num">79 (inlines 0, 40, …, 3120)</td><td class="num">51 (inlines 0, 12, …, 600)</td></tr>
+<tr><td>Inlines em tile</td><td class="num">316 de 3137 (10,1 %)</td><td class="num">201 de 601 (33,4 %)</td></tr>
+<tr><td>Inlines medidos no <code>block_iou</code></td><td class="num">2821</td><td class="num">400</td></tr>
+<tr><td>Maior distância de um inline medido ao inline de treino mais próximo</td><td class="num">18 inlines</td><td class="num">4 inlines</td></tr>
+</table>
+</div>
+<p>Detalhe do f3: o último bloco (inline 600) tem só 1 inline; o preenchimento por reflexão de um eixo de tamanho 1 repete esse inline 4 vezes, tanto na sísmica quanto no rótulo, então ele fica coerente. É bloco de treino (<code>600//4 = 150</code>, múltiplo de 3), e o Predict o pula pela mesma conta.</p>
+
+<!-- ====================================================================== -->
+<h2 id="tiles">4. Como cada bloco vira tiles</h2>
+<p>Cada bloco <code>(4, z, xline)</code> é preenchido no fim de <code>z</code> e de <code>xline</code> até o próximo múltiplo do tile e cortado numa grade <strong>sem sobreposição</strong>, em ordem z-depois-xline. A sísmica é preenchida com <code>np.pad(..., 'reflect')</code> e o rótulo com <code>np.pad(..., 'edge')</code>.</p>
+
+<figure>
+<svg viewBox="0 0 940 330" role="img" aria-label="Grade de tiles de um bloco do marlim">
+<text class="s-txt s-b" x="10" y="20">Um bloco do marlim: (4, 552, 2050) → preenchido até (4, 768, 2304) → 3 × 9 = 27 tiles de 256 × 256</text>
+<g transform="translate(40,40)">
+  <!-- área total 2304x768 escalada por 0.36 -> 829 x 276 -->
+  <rect class="f-pad" x="0" y="0" width="829" height="276"/>
+  <rect class="f-real" x="0" y="0" width="738" height="199" stroke="var(--accent)" stroke-width="1.5"/>
+  <g class="s-line" style="stroke:var(--muted)">
+    <path d="M92,0V276 M184,0V276 M276,0V276 M369,0V276 M461,0V276 M553,0V276 M645,0V276 M737,0V276 M0,92H829 M0,184H829"/>
+    <rect x="0" y="0" width="829" height="276"/>
+  </g>
+  <text class="s-sm" x="300" y="105">dado real 552 × 2050</text>
+  <text class="s-sm" x="745" y="40">2 cols reais</text>
+  <text class="s-sm" x="745" y="56">+ 254 refletidas</text>
+  <text class="s-sm" x="10" y="230">40 linhas reais + 216 refletidas</text>
+  <text class="s-sm" x="-34" y="50" transform="rotate(-90,-24,50)">z ↓</text>
+  <text class="s-sm" x="400" y="292">xline →</text>
+</g>
+</svg>
+<div class="legend"><span style="--c:var(--code);outline:1px solid var(--accent)">dado real</span><span style="--c:var(--pad)">preenchimento (reflexão na sísmica, borda no rótulo)</span></div>
+<figcaption>11 dos 27 tiles de cada bloco têm preenchimento; os 3 da última coluna são 99 % preenchimento. No marlim, 36 % de todos os voxels dos tiles são preenchimento; no f3 (preenchimento de 1 linha em z e 123 colunas em xline), 12 %.</figcaption>
+</figure>
+
+<p>Na ordem do <code>DataBase.csv</code>, o tile <code>i</code> é o bloco <code>i // 27</code>, linha <code>(i % 27) // 9</code>, coluna <code>i % 9</code> (no f3: 16 por bloco, 2 × 8). Sem <code>scaling</code> (o caso atual) o tile é gravado como está no volume; com <code>normalize</code>/<code>standardize</code>, a mesma função é aplicada a cada tile no Format e a cada tile do bloco no Predict.</p>
+
+<h3>O preenchimento do rótulo não acompanha o da sísmica</h3>
+<figure>
+<svg viewBox="0 0 940 250" role="img" aria-label="Reflexão da sísmica versus borda do rótulo">
+<g transform="translate(20,20)">
+  <text class="s-txt s-b" x="0" y="0">sísmica: reflect</text>
+  <g transform="translate(0,14)">
+    <rect x="0" y="0" width="160" height="30" fill="var(--train)" opacity=".7"/>
+    <rect x="0" y="30" width="160" height="30" fill="var(--val)" opacity=".8"/>
+    <rect x="0" y="60" width="160" height="30" fill="var(--test)" opacity=".8"/>
+    <line x1="0" y1="90" x2="160" y2="90" stroke="var(--ink)" stroke-width="2"/>
+    <rect x="0" y="90" width="160" height="30" fill="var(--val)" opacity=".8"/>
+    <rect x="0" y="120" width="160" height="30" fill="var(--train)" opacity=".7"/>
+    <rect x="0" y="150" width="160" height="30" fill="var(--unseen)" opacity=".5"/>
+    <text class="s-sm" x="168" y="94">fim do volume</text>
+    <text class="s-sm" x="168" y="140">camadas espelhadas</text>
+    <text class="s-sm" x="168" y="154">(estratigrafia invertida)</text>
+  </g>
+</g>
+<g transform="translate(400,20)">
+  <text class="s-txt s-b" x="0" y="0">rótulo: edge</text>
+  <g transform="translate(0,14)">
+    <rect x="0" y="0" width="160" height="30" fill="var(--train)" opacity=".7"/>
+    <rect x="0" y="30" width="160" height="30" fill="var(--val)" opacity=".8"/>
+    <rect x="0" y="60" width="160" height="30" fill="var(--test)" opacity=".8"/>
+    <line x1="0" y1="90" x2="160" y2="90" stroke="var(--ink)" stroke-width="2"/>
+    <rect x="0" y="90" width="160" height="90" fill="var(--test)" opacity=".8"/>
+    <text class="s-sm" x="168" y="94">fim do volume</text>
+    <text class="s-sm" x="168" y="140">a última classe repetida</text>
+    <text class="s-sm" x="168" y="154">em toda a faixa</text>
+  </g>
+</g>
+<text class="s-sm" x="20" y="230">Medido nos dados: o rótulo de borda difere do que seria o rótulo refletido em 14,0 % dos voxels de preenchimento do marlim e em 22,4 % dos do f3.</text>
+</svg>
+<figcaption>Esquema no eixo z. Na faixa preenchida a rede vê camadas espelhadas, mas é ensinada (e avaliada no test_iou) a pintar tudo com a classe da última linha.</figcaption>
+</figure>
+
+<!-- ====================================================================== -->
+<h2 id="split">5. Separação treino / validação / teste</h2>
+<pre><code>temp_df, test_df = train_test_split(df, test_size=0.1, random_state=42)
+train_df, val_df = train_test_split(temp_df, test_size=0.1/0.9, random_state=42)   # 80 / 10 / 10</code></pre>
+<p>O split é <strong>tile a tile, aleatório</strong>, entre todos os tiles de todos os blocos que viraram tile. Não há grupo por bloco: tiles do mesmo bloco (os mesmos 4 inlines, lado a lado em z/xline) caem em conjuntos diferentes.</p>
+
+<figure>
+<svg viewBox="0 0 940 200" role="img" aria-label="Split aleatório de tiles">
+<text class="s-txt s-b" x="10" y="20">3 blocos do marlim (27 tiles cada) com o split aleatório: vizinhos de grade caem em conjuntos diferentes</text>
+<!-- bloco A -->
+<g transform="translate(10,40)">
+  <text class="s-sm" x="0" y="-4">bloco k=0</text>
+  <rect class="f-train" x="0" y="0" width="30" height="30"/><rect class="f-train" x="31" y="0" width="30" height="30"/><rect class="f-test" x="62" y="0" width="30" height="30"/><rect class="f-train" x="93" y="0" width="30" height="30"/><rect class="f-train" x="124" y="0" width="30" height="30"/><rect class="f-val" x="155" y="0" width="30" height="30"/><rect class="f-train" x="186" y="0" width="30" height="30"/><rect class="f-train" x="217" y="0" width="30" height="30"/><rect class="f-train" x="248" y="0" width="30" height="30"/>
+  <rect class="f-train" x="0" y="31" width="30" height="30"/><rect class="f-train" x="31" y="31" width="30" height="30"/><rect class="f-train" x="62" y="31" width="30" height="30"/><rect class="f-train" x="93" y="31" width="30" height="30"/><rect class="f-test" x="124" y="31" width="30" height="30"/><rect class="f-train" x="155" y="31" width="30" height="30"/><rect class="f-train" x="186" y="31" width="30" height="30"/><rect class="f-train" x="217" y="31" width="30" height="30"/><rect class="f-train" x="248" y="31" width="30" height="30"/>
+  <rect class="f-train" x="0" y="62" width="30" height="30"/><rect class="f-val" x="31" y="62" width="30" height="30"/><rect class="f-train" x="62" y="62" width="30" height="30"/><rect class="f-train" x="93" y="62" width="30" height="30"/><rect class="f-train" x="124" y="62" width="30" height="30"/><rect class="f-train" x="155" y="62" width="30" height="30"/><rect class="f-train" x="186" y="62" width="30" height="30"/><rect class="f-train" x="217" y="62" width="30" height="30"/><rect class="f-test" x="248" y="62" width="30" height="30"/>
+</g>
+<g transform="translate(320,40)">
+  <text class="s-sm" x="0" y="-4">bloco k=10</text>
+  <rect class="f-train" x="0" y="0" width="30" height="30"/><rect class="f-val" x="31" y="0" width="30" height="30"/><rect class="f-train" x="62" y="0" width="30" height="30"/><rect class="f-train" x="93" y="0" width="30" height="30"/><rect class="f-train" x="124" y="0" width="30" height="30"/><rect class="f-train" x="155" y="0" width="30" height="30"/><rect class="f-test" x="186" y="0" width="30" height="30"/><rect class="f-train" x="217" y="0" width="30" height="30"/><rect class="f-train" x="248" y="0" width="30" height="30"/>
+  <rect class="f-train" x="0" y="31" width="30" height="30"/><rect class="f-train" x="31" y="31" width="30" height="30"/><rect class="f-train" x="62" y="31" width="30" height="30"/><rect class="f-train" x="93" y="31" width="30" height="30"/><rect class="f-train" x="124" y="31" width="30" height="30"/><rect class="f-train" x="155" y="31" width="30" height="30"/><rect class="f-train" x="186" y="31" width="30" height="30"/><rect class="f-train" x="217" y="31" width="30" height="30"/><rect class="f-val" x="248" y="31" width="30" height="30"/>
+  <rect class="f-test" x="0" y="62" width="30" height="30"/><rect class="f-train" x="31" y="62" width="30" height="30"/><rect class="f-train" x="62" y="62" width="30" height="30"/><rect class="f-train" x="93" y="62" width="30" height="30"/><rect class="f-train" x="124" y="62" width="30" height="30"/><rect class="f-train" x="155" y="62" width="30" height="30"/><rect class="f-train" x="186" y="62" width="30" height="30"/><rect class="f-train" x="217" y="62" width="30" height="30"/><rect class="f-train" x="248" y="62" width="30" height="30"/>
+</g>
+<g transform="translate(630,40)">
+  <text class="s-sm" x="0" y="-4">bloco k=20</text>
+  <rect class="f-train" x="0" y="0" width="30" height="30"/><rect class="f-train" x="31" y="0" width="30" height="30"/><rect class="f-train" x="62" y="0" width="30" height="30"/><rect class="f-val" x="93" y="0" width="30" height="30"/><rect class="f-train" x="124" y="0" width="30" height="30"/><rect class="f-train" x="155" y="0" width="30" height="30"/><rect class="f-train" x="186" y="0" width="30" height="30"/><rect class="f-train" x="217" y="0" width="30" height="30"/><rect class="f-train" x="248" y="0" width="30" height="30"/>
+  <rect class="f-train" x="0" y="31" width="30" height="30"/><rect class="f-test" x="31" y="31" width="30" height="30"/><rect class="f-train" x="62" y="31" width="30" height="30"/><rect class="f-train" x="93" y="31" width="30" height="30"/><rect class="f-train" x="124" y="31" width="30" height="30"/><rect class="f-train" x="155" y="31" width="30" height="30"/><rect class="f-train" x="186" y="31" width="30" height="30"/><rect class="f-train" x="217" y="31" width="30" height="30"/><rect class="f-train" x="248" y="31" width="30" height="30"/>
+  <rect class="f-train" x="0" y="62" width="30" height="30"/><rect class="f-train" x="31" y="62" width="30" height="30"/><rect class="f-train" x="62" y="62" width="30" height="30"/><rect class="f-train" x="93" y="62" width="30" height="30"/><rect class="f-val" x="124" y="62" width="30" height="30"/><rect class="f-train" x="155" y="62" width="30" height="30"/><rect class="f-train" x="186" y="62" width="30" height="30"/><rect class="f-test" x="217" y="62" width="30" height="30"/><rect class="f-train" x="248" y="62" width="30" height="30"/>
+</g>
+<text class="s-sm" x="10" y="160">Ilustração (o sorteio real está no DataBase.csv). Os blocos nunca vistos entre eles não aparecem aqui: não viram tile e não estão em nenhum dos três conjuntos.</text>
+</svg>
+<div class="legend"><span style="--c:var(--train)">treino (80 %)</span><span style="--c:var(--val)">validação (10 %, early stopping)</span><span style="--c:var(--test)">teste (10 %, <code>test_iou</code>)</span></div>
+</figure>
+
+<div class="table-wrap">
+<table>
+<tr><th>Split atual (random_state=42)</th><th>marlim</th><th>f3</th></tr>
+<tr><td>Tiles total / treino / val / teste</td><td class="num">2133 / 1705 / 214 / 214</td><td class="num">816 / 652 / 82 / 82</td></tr>
+<tr><td>Blocos que têm pelo menos 1 tile de teste</td><td class="num">73 de 79</td><td class="num">40 de 51</td></tr>
+<tr><td>Tiles de teste com um vizinho de grade (mesmo bloco) no treino</td><td class="num">208 de 214</td><td class="num">81 de 82</td></tr>
+<tr><td>Tiles de teste na borda cujo preenchimento espelha um tile de treino</td><td class="num">70 de 214</td><td class="num">5 de 82</td></tr>
+</table>
+</div>
+<p>O <code>3 - Predict</code> refaz exatamente este split (mesmo CSV, mesma ordem, mesmo <code>random_state</code>) e para com erro se o total ou o número de tiles de teste não bater com o <code>division.n_images</code> gravado.</p>
+
+<!-- ====================================================================== -->
+<h2 id="treino">6. Treino</h2>
+<ul>
+<li>Semente <code>42 + trial</code>; <code>classes = msk_max + 1</code>.</li>
+<li>Cada época: treino nos 80 % (com aumentação opcional sorteada por <code>(semente, época, índice)</code>, só no treino), avaliação nos 10 % de validação.</li>
+<li>Early stopping no <code>val_iou</code> com <code>patience</code>; no fim, o melhor estado é restaurado (com EMA, o do EMA).</li>
+<li>O teste só é usado depois do treino: nada do teste entra em loss, scheduler ou early stopping.</li>
+<li>Salva <code>Model/Backup/model_N/</code> com o <code>info.json</code> (<code>processing</code> = o <code>Task/info.json</code> como veio, <code>division</code> = o split) e o <code>model.pth</code>.</li>
+</ul>
+
+<!-- ====================================================================== -->
+<h2 id="teste">7. Avaliação nos tiles de teste (<code>test_iou</code>)</h2>
+<p>O <code>3 - Predict</code> passa os tiles de teste inteiros pela rede (ou por janela deslizante se treinou com <code>crop</code>) e soma todos os voxels numa matriz de confusão <code>classes × classes</code>. Daí saem <code>test_iou</code> e <code>test_metrics</code>.</p>
+<p><strong>Atenção:</strong> os tiles de teste são medidos <strong>inteiros, com o preenchimento</strong>. No marlim, mais de um terço dos voxels de teste são reflexão com o rótulo de borda (seção 4). O <code>block_iou</code> não tem esse problema (seção 8).</p>
+
+<!-- ====================================================================== -->
+<h2 id="bloco">8. Remontagem do bloco e <code>block_iou</code></h2>
+<p>O <code>PredictBuilder</code> percorre o volume bruto bloco a bloco (4 inlines por vez) e repete o corte do Format:</p>
+<ol>
+<li>Se o bloco virou tile (<code>(z//4) % step == 0</code>) e <code>SAVE_PRED</code> é falso, pula.</li>
+<li>Preenche o bloco por reflexão até múltiplo do tile (a mesma grade do Format, começando em 0).</li>
+<li>Para cada tile da grade: aplica a mesma <code>Normalization</code> do Format, prediz com <code>Augmentations.infer</code> e o mesmo <code>amp</code>, faz <code>argmax</code> e escreve a classe no lugar.</li>
+<li><strong>Recorta o preenchimento</strong> (<code>result[:4, :552, :2050]</code>) e grava o bloco em <code>pred[z:z+4]</code>.</li>
+<li>Se o bloco <strong>não</strong> é de tile, soma <code>masks[bloco]</code> × <code>pred[bloco]</code> na matriz de confusão (só dentro do <code>VALID</code>, hoje o volume inteiro).</li>
+</ol>
+
+<figure>
+<svg viewBox="0 0 940 300" role="img" aria-label="Remontagem do bloco">
+<g transform="translate(10,20)">
+  <text class="s-txt s-b" x="0" y="0">volume bruto, bloco a bloco</text>
+  <g transform="translate(0,14)">
+    <rect class="f-train" x="0" y="0" width="26" height="60"/>
+    <rect class="f-unseen" x="27" y="0" width="26" height="60" opacity=".7"/>
+    <rect class="f-unseen" x="54" y="0" width="26" height="60" opacity=".7"/>
+    <rect class="f-unseen" x="81" y="0" width="26" height="60" opacity=".7"/>
+    <text class="s-sm" x="110" y="34">…</text>
+    <rect class="f-train" x="126" y="0" width="26" height="60"/>
+    <rect class="f-unseen" x="153" y="0" width="26" height="60" opacity=".7"/>
+  </g>
+</g>
+<path class="s-arrow" d="M200,64 H246"/>
+<g transform="translate(250,20)">
+  <text class="s-txt s-b" x="0" y="0">um bloco não visto</text>
+  <g transform="translate(0,14)">
+    <rect class="f-pad" x="0" y="0" width="180" height="90"/>
+    <rect class="f-real" x="0" y="0" width="160" height="65" stroke="var(--accent)"/>
+    <g class="s-line" style="stroke:var(--muted)"><path d="M20,0V90 M40,0V90 M60,0V90 M80,0V90 M100,0V90 M120,0V90 M140,0V90 M160,0V90 M0,30H180 M0,60H180"/><rect x="0" y="0" width="180" height="90"/></g>
+  </g>
+  <text class="s-sm" x="0" y="124">reflete até múltiplo do tile,</text>
+  <text class="s-sm" x="0" y="138">prediz tile a tile (sem sobreposição)</text>
+</g>
+<path class="s-arrow" d="M450,64 H496"/>
+<g transform="translate(500,20)">
+  <text class="s-txt s-b" x="0" y="0">recorta e grava</text>
+  <g transform="translate(0,14)"><rect class="f-unseen" x="0" y="0" width="160" height="65" opacity=".7"/></g>
+  <text class="s-sm" x="0" y="100">pred[z:z+4] = bloco[:, :552, :2050]</text>
+</g>
+<path class="s-arrow" d="M700,64 H746"/>
+<g transform="translate(750,20)">
+  <text class="s-txt s-b" x="0" y="0">matriz de confusão</text>
+  <g transform="translate(0,14)">
+    <rect class="s-box" x="0" y="0" width="80" height="80"/>
+    <g class="s-line"><path d="M13,0V80 M27,0V80 M40,0V80 M53,0V80 M67,0V80 M0,13H80 M0,27H80 M0,40H80 M0,53H80 M0,67H80"/></g>
+    <rect class="f-unseen" x="0" y="0" width="13" height="13"/><rect class="f-unseen" x="13" y="13" width="14" height="14"/><rect class="f-unseen" x="27" y="27" width="13" height="13"/><rect class="f-unseen" x="40" y="40" width="13" height="13"/><rect class="f-unseen" x="53" y="53" width="14" height="14"/><rect class="f-unseen" x="67" y="67" width="13" height="13"/>
+  </g>
+  <text class="s-sm" x="0" y="112">só blocos fora do step</text>
+  <text class="s-sm" x="0" y="126">→ block_iou, block_metrics</text>
+</g>
+<g transform="translate(10,190)">
+  <text class="s-txt s-b" x="0" y="0">Bloco de tile (treino, validação ou teste)</text>
+  <text class="s-sm" x="0" y="20">SAVE_PRED = False: pulado, pred fica com zero nesses inlines (em memória; nada é gravado).</text>
+  <text class="s-sm" x="0" y="38">SAVE_PRED = True: predito pelo mesmo caminho e gravado em pred, mas nunca somado na matriz.</text>
+  <text class="s-sm" x="0" y="56">Em nenhum caso entra no block_iou: treino, validação e teste ficam todos de fora.</text>
+</g>
+</svg>
+<figcaption>O preenchimento é recortado antes da métrica: o block_iou mede só voxels reais, só nos inlines que a rede nunca viu.</figcaption>
+</figure>
+
+<p>Como a grade do Predict começa nos mesmos lugares da do Format (z múltiplo de 4, z/xline múltiplos do tile a partir de 0), os tiles preditos nos blocos de treino são <strong>exatamente</strong> os tiles do treino. As predições de tiles vizinhos não se sobrepõem nem são combinadas: cada voxel vem de um único tile, o que pode deixar costuras nas bordas dos tiles.</p>
+
+<!-- ====================================================================== -->
+<h2 id="pred">9. O <code>predicted.npy</code></h2>
+<ul>
+<li>Só existe com <code>SAVE_PRED = True</code> (hoje <code>False</code> no notebook). É salvo em <code>model_N/predicted.npy</code>, uint8, mesmo shape e classes do rótulo (≈ 3,5 GB no marlim).</li>
+<li>Cobre o <strong>volume inteiro</strong>, sem buraco: blocos de tile e blocos nunca vistos.</li>
+<li><strong>O que é igual</strong> entre os dois tipos de bloco: o mesmo corte, o mesmo preenchimento, a mesma normalização, o mesmo modelo, o mesmo <code>amp</code> e o mesmo recorte do preenchimento.</li>
+<li><strong>O que muda:</strong> só a origem dos inlines. Nos blocos de tile, 80 % dos tiles foram vistos no treino (e 10 % guiaram o early stopping), então ali a predição é quase uma cópia do rótulo; nos outros é generalização.</li>
+<li>A métrica não muda com <code>SAVE_PRED</code>: os blocos de tile nunca entram na matriz. Se for medir alguma coisa no <code>predicted.npy</code> fora do notebook, aplique a mesma máscara <code>(np.arange(N) // 4) % step != 0</code> nos inlines.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 940 110" role="img" aria-label="Conteúdo do predicted.npy">
+<text class="s-txt s-b" x="10" y="20">predicted.npy (eixo inline)</text>
+<g transform="translate(10,32)">
+  <rect class="f-unseen" x="0" y="0" width="900" height="34" opacity=".55"/>
+  <rect class="f-train" x="0" y="0" width="30" height="34"/><rect class="f-train" x="300" y="0" width="30" height="34"/><rect class="f-train" x="600" y="0" width="30" height="34"/>
+  <text class="s-sm" x="0" y="54">predito, mas visto no treino</text>
+  <text class="s-sm" x="350" y="54">predito sem nunca ter sido visto: única parte do block_iou</text>
+</g>
+</svg>
+</figure>
+
+<!-- ====================================================================== -->
+<h2 id="auditoria">10. Auditoria: o que está certo e o que não está</h2>
+
+<div class="verdict ok"><span class="tag ok">OK</span><strong>O step é o mesmo no corte e na métrica.</strong> <code>range(0, N, 4·step)</code> no Format e <code>(z//4) % step == 0</code> no Predict selecionam os mesmos blocos, e o Predict exige que <code>step</code>, <code>scaling</code> e o número de tiles do <code>DataBase.csv</code> sejam os do modelo.</div>
+
+<div class="verdict ok"><span class="tag ok">OK</span><strong>O <code>block_iou</code> é medido só no que a rede não viu.</strong> Blocos de treino, validação e teste são todos pulados na matriz, o preenchimento é recortado antes de medir e a região é o volume real. Não há vazamento de voxel rotulado para essa métrica.</div>
+
+<div class="verdict ok"><span class="tag ok">OK</span><strong>Teste fora do treino.</strong> O teste não entra em loss, scheduler nem early stopping; a aumentação é só no treino; o split do Predict é o mesmo do treino e conferido pelas contagens.</div>
+
+<div class="verdict ok"><span class="tag ok">OK</span><strong>Tiles sem sobreposição de voxel real.</strong> A grade tem passo igual ao tamanho do tile em todos os eixos e os blocos não se tocam; o F3 é remontado antes de cortar, então o mesmo voxel real não aparece em dois tiles.</div>
+
+<div class="verdict ok"><span class="tag ok">OK</span><strong>O <code>predicted.npy</code> cobre o volume inteiro.</strong> Com <code>SAVE_PRED = True</code> todos os blocos são preditos pelo mesmo caminho; o arquivo só se distingue pelos inlines de treino terem sido vistos.</div>
+
+<div class="verdict bad"><span class="tag bad">PROBLEMA</span><strong>Rótulo do preenchimento incoerente com a sísmica.</strong> <code>TilesBuilder.build</code> (<code>Dataset/index.py</code>) preenche a sísmica com <code>reflect</code> e o rótulo com <code>edge</code>. No marlim, 36 % dos voxels dos tiles são preenchimento (216 linhas em z e 254 colunas em xline por bloco), e em 14 % deles o rótulo de borda não é o rótulo do dado espelhado (no f3: 12 % e 22,4 %). Isso
+<ul>
+<li>ensina a rede a pintar camadas espelhadas com a classe da última linha (ruído de rótulo no treino);</li>
+<li>entra no <code>test_iou</code> e no <code>val_iou</code> do early stopping, porque esses tiles são medidos inteiros.</li>
+</ul>
+É a explicação mais provável de o <code>test_iou</code> ficar <strong>abaixo</strong> do <code>block_iou</code> em todos os backups (ex.: Backup3 dbrnet 0,938 × 0,963; Backup4 f3 dbrnet 0,827 × 0,909), o contrário do esperado para tiles vizinhos do treino. O <code>block_iou</code> não é afetado.</div>
+
+<div class="verdict warn"><span class="tag warn">VAZAMENTO LEVE</span><strong>O split por tile deixa teste e validação ao lado do treino.</strong> 208 dos 214 tiles de teste do marlim têm um vizinho de grade no treino (mesmos 4 inlines, encostado em z ou xline), e em 70 deles o preenchimento é uma cópia espelhada da sísmica de um tile de treino (o último tile em xline tem 2 colunas reais e 254 espelhadas do tile anterior). Não é o mesmo voxel, mas é a mesma geologia contínua: <code>test_iou</code> e <code>val_iou</code> medem algo próximo de interpolação dentro do bloco, e o early stopping escolhe a época por uma validação otimista. O <code>block_iou</code> não depende desse split.</div>
+
+<div class="verdict warn"><span class="tag warn">ATENÇÃO</span><strong>O <code>block_iou</code> mede interpolação entre inlines de treino, não uma área nova.</strong> Os blocos medidos estão intercalados com os de treino: no máximo 18 inlines do inline de treino mais próximo no marlim com step 10, e 4 no f3 com step 3. Por isso o <code>block_iou</code> cai à medida que o step cresce (marlim/resaceunet: 0,95–0,96 com step 3, 0,93 com step 5, 0,875 com step 10; f3: 0,905 → 0,871 → 0,863 → 0,804 com step 3, 4, 5, 10). É uma métrica correta e sem vazamento de rótulo, mas não diz como o modelo se sai numa região contígua que nunca viu (o protocolo do benchmark do F3 usa volumes de teste separados).</div>
+
+<div class="verdict warn"><span class="tag warn">ATENÇÃO</span><strong>Normalização global.</strong> O marlim já vem no p01/p99 do volume inteiro, calculados também com os inlines de teste. É só escala de amplitude, sem rótulo, e é prática comum; vale citar no texto.</div>
+
+<div class="verdict warn"><span class="tag warn">MENOR</span>
+<ul>
+<li>A predição do bloco é tile a tile sem sobreposição: sem média nas bordas, podem aparecer costuras (o <code>block_iou</code> é o desse jeito, consistente com o treino).</li>
+<li>Com <code>SAVE_PRED = False</code>, <code>builder.pred</code> tem zero nos inlines de treino, e zero é a classe 0 (fácies real). Não é gravado, mas não use esse array para nada além das vistas.</li>
+<li>Com <code>"step": null</code> e sem <code>DataBase.csv</code> compatível, o Format faz <code>OPTIONS.get('step', 3)</code> → <code>None</code> e quebra (a chave existe com valor nulo, então o padrão 3 não entra).</li>
+<li>O <code>CLAUDE.md</code> ainda fala em <code>normalize</code> (o código usa <code>scaling</code>) e em <code>Model/0 - Model_CV.ipynb</code>, que não existe mais.</li>
+</ul>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="correcoes">11. Correções sugeridas</h2>
+<p>A métrica de teste não é mais usada; a coluna “interfere em” diz o que cada problema afeta no que ainda importa (treino, early stopping, <code>block_iou</code>, <code>predicted.npy</code>). Prioridade: <strong>alta</strong> muda o modelo treinado, <strong>média</strong> muda a leitura do resultado, <strong>baixa</strong> é acabamento.</p>
+<div class="table-wrap">
+<table>
+<tr><th>#</th><th>Problema</th><th>Descrição</th><th>Interfere em</th><th>Solução</th><th>Prioridade</th></tr>
+<tr><td>1</td><td>Rótulo da borda incoerente com a sísmica</td><td><code>TilesBuilder.build</code> preenche a sísmica com <code>reflect</code> e o rótulo com <code>edge</code>. No marlim, 36 % dos voxels dos tiles são borda preenchida, e em 14 % deles o rótulo não corresponde ao dado espelhado (f3: 12 % e 22 %).</td><td>Treino (ruído de rótulo), <code>val_iou</code> e, por ele, a época escolhida pelo early stopping. O <code>block_iou</code> não conta a borda, mas mede um modelo treinado com esse ruído.</td><td>Mínima: trocar <code>'edge'</code> por <code>'reflect'</code> no pad da máscara (1 linha em <code>Dataset/index.py</code>). Melhor: no último tile de cada eixo, começar em <code>tamanho − tile</code> (encostado no fim, como o <code>PredictDataset</code>), sem dado inventado. Rodar o <code>Format</code> de novo.</td><td>Alta</td></tr>
+<tr><td>2</td><td>Validação encostada no treino</td><td>O split é aleatório tile a tile: tiles de validação ficam ao lado de tiles de treino dos mesmos 4 inlines e, na borda, contêm uma cópia espelhada deles.</td><td><code>val_iou</code> otimista → early stopping e scheduler <code>plateau</code> decidem por uma validação que é quase o treino; tende a parar tarde e a sobreajustar.</td><td>Separar por bloco de inlines: <code>GroupShuffleSplit</code> com grupo <code>índice // tiles_por_bloco</code> (27 no marlim, 16 no f3), ou reservar blocos inteiros para validação. Com isso a solução “encostar no fim” do item 1 também fica segura.</td><td>Alta</td></tr>
+<tr><td>3</td><td><code>block_iou</code> mede interpolação</td><td>Os inlines medidos ficam intercalados com os de treino (no máximo 18 inlines do treino com step 10 no marlim; 4 com step 3 no f3). Por isso o <code>block_iou</code> cai à medida que o step cresce.</td><td>Interpretação do <code>block_iou</code>: diz como o modelo preenche entre inlines interpretados, não como se sai numa área nova. Comparações só valem com o mesmo step.</td><td>Comparar sempre com o mesmo step. Para generalização, reservar uma faixa contígua (ex.: últimos 20 % dos inlines) que não vira tile e medir nela como uma segunda métrica (ex.: <code>region_iou</code>).</td><td>Média</td></tr>
+<tr><td>4</td><td>Normalização global</td><td>O marlim vem no p01/p99 do volume inteiro, calculado também com os inlines medidos.</td><td>Só a escala de amplitude: sem rótulo, efeito desprezível no <code>block_iou</code>.</td><td>Manter e citar no texto. Se quiser rigor total, recalcular o p01/p99 só nos inlines de tile.</td><td>Baixa</td></tr>
+<tr><td>5</td><td>Costuras na predição do bloco</td><td>O <code>PredictBuilder</code> prediz tile a tile sem sobreposição; cada voxel vem de um só tile, e a borda do tile tem menos contexto.</td><td><code>block_iou</code> levemente menor nas bordas dos tiles; descontinuidades visíveis no <code>predicted.npy</code> e nas vistas.</td><td>Predizer com janela deslizante com sobreposição e média dos logits (<code>sliding_window_inference</code> do MONAI, <code>overlap=0.5</code>, <code>mode='gaussian'</code>), mantendo o recorte da borda.</td><td>Média</td></tr>
+<tr><td>6</td><td>Zeros nos inlines de treino sem <code>SAVE_PRED</code></td><td>Com <code>SAVE_PRED = False</code>, <code>builder.pred</code> fica 0 nos blocos de treino, e 0 é a classe 0 (fácies real).</td><td>Só quem usar <code>builder.pred</code> em memória além das vistas; nada é gravado.</td><td>Iniciar <code>pred</code> com 255 (fora das classes) em vez de 0.</td><td>Baixa</td></tr>
+<tr><td>7</td><td><code>"step": null</code> quebra o <code>Format</code></td><td><code>OPTIONS.get('step', 3)</code> devolve <code>None</code> quando a chave existe com valor nulo.</td><td>Rodada com <code>step</code> nulo sem <code>DataBase.csv</code> compatível: o <code>Format</code> falha.</td><td><code>STEP = OPTIONS.get('step') or 3</code> nos dois <code>Format</code>.</td><td>Baixa</td></tr>
+<tr><td>8</td><td><code>CLAUDE.md</code> desatualizado</td><td>Fala em <code>normalize</code> (o código usa <code>scaling</code>) e em <code>0 - Model_CV.ipynb</code>, que não existe mais.</td><td>Documentação.</td><td>Atualizar o <code>CLAUDE.md</code>.</td><td>Baixa</td></tr>
+</table>
+</div>
+<p>Os itens 1 e 2 mudam os tiles e o split: o <code>block_iou</code> dos backups antigos continua medido do mesmo jeito, mas os modelos novos terão sido treinados em outros dados, então a comparação vale como “antes × depois da correção”.</p>
+
+<!-- ====================================================================== -->
+<h2 id="solucoes">12. Soluções em detalhe</h2>
+<p>Para cada problema da tabela: o que mudar no código, por que isso resolve e o que custa. Os trechos são propostas; nada disso foi aplicado ainda.</p>
+
+<h3>1. Rótulo da borda incoerente com a sísmica</h3>
+<p><strong>Causa.</strong> O <code>np.pad</code> com <code>reflect</code> preenche a posição <code>n + i</code> com o dado da posição <code>n − 2 − i</code>; com <code>edge</code>, preenche tudo com a posição <code>n − 1</code>. A sísmica e o rótulo de um mesmo voxel preenchido vêm, portanto, de lugares diferentes do volume.</p>
+<p><strong>Solução A (mínima): o mesmo preenchimento nos dois.</strong></p>
+<pre><code># Dataset/index.py, TilesBuilder.build
+msk = self.pad(np.asarray(masks[z:z + tz]).astype(np.uint8), 'reflect')   # era 'edge'</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> com <code>reflect</code> nos dois, cada voxel preenchido recebe a sísmica e o rótulo <strong>do mesmo voxel de origem</strong>. O rótulo volta a descrever o que a rede está vendo, e os 14 % (marlim) / 22 % (f3) de voxels com rótulo errado somem.</li>
+<li><strong>O que não resolve:</strong> a faixa espelhada continua sendo dado inventado. Em z a estratigrafia aparece de cabeça para baixo (216 das 256 linhas do último tile do marlim), e o último tile em xline continua sendo 99 % cópia do anterior. Agora com o rótulo certo, mas ainda é cópia.</li>
+<li><strong>O 3 - Predict não muda:</strong> ele já preenche a sísmica com <code>reflect</code> e recorta a borda antes de medir.</li>
+</ul>
+<p><strong>Solução B (recomendada): último tile encostado no fim, sem preenchimento.</strong> Em vez de completar o volume, o último tile de cada eixo começa em <code>tamanho − tile</code> e se sobrepõe ao anterior (a mesma ideia do <code>PredictDataset</code>):</p>
+<pre><code># Dataset/index.py, TilesBuilder
+def starts(self, n, t):
+    return sorted(set(range(0, n - t + 1, t)) | {n - t})     # marlim z: 0, 256, 296 · xline: 0, 256, …, 1792, 1794
+
+def build(self, seismic, masks):
+    ...
+    for z in tqdm(range(0, seismic.shape[0], tz * self.step)):
+        pads = [(0, -len(seismic[z:z + tz]) % tz), (0, 0), (0, 0)]      # pad só no eixo inline (bloco final curto); z e xline ficam reais
+        img  = np.pad(np.asarray(seismic[z:z + tz], dtype=np.float32), pads, mode='reflect')
+        msk  = np.pad(np.asarray(masks[z:z + tz]).astype(np.uint8), pads, mode='reflect')
+
+        for y in self.starts(img.shape[1], ty):
+            for x in self.starts(img.shape[2], tx):
+                ...</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> todo voxel de todo tile é dado real, com o seu rótulo real. Não há estratigrafia invertida, nem cópia espelhada, nem rótulo inventado. O pad passa a valer só para o eixo inline, no bloco final com menos de 4 inlines (f3, inline 600), onde o <code>reflect</code> de 1 inline é uma simples repetição e fica coerente.</li>
+<li><strong>Efeito colateral:</strong> o último tile se sobrepõe ao vizinho (no marlim, 216 linhas em z e 254 colunas em xline). Isso só é seguro com o split por bloco do item 2: com o split por tile, voxels reais idênticos poderiam cair em treino e validação.</li>
+<li><strong>O 3 - Predict muda junto:</strong> <code>PredictBuilder.process</code> usa a mesma grade <code>starts</code>, sem preenchimento em z/xline; na sobreposição, ou o último tile sobrescreve, ou (melhor) os logits são somados e o <code>argmax</code> é tirado no fim (ver item 5).</li>
+<li><strong>Quantidade de tiles:</strong> a mesma (3 × 9 por bloco no marlim, 2 × 8 no f3); só muda a posição do último de cada eixo.</li>
+</ul>
+<p>Uma terceira via seria marcar a borda com um rótulo de ignorar (ex.: 255) e excluí-lo da loss e das métricas, mas as losses do MONAI usadas aqui (<code>DiceFocalLoss</code>, <code>DiceCELoss</code>) não têm <code>ignore_index</code>: daria uma máscara de pesos em todas as losses. A solução B chega ao mesmo resultado sem mexer nelas.</p>
+
+<h3>2. Validação encostada no treino</h3>
+<p><strong>Causa.</strong> O <code>train_test_split</code> sorteia tiles soltos. Um bloco de 27 tiles do marlim manda, em média, 21–22 para o treino e o resto para validação/teste, todos nos mesmos 4 inlines e lado a lado em z/xline.</p>
+<p><strong>Solução: sortear blocos inteiros.</strong> O <code>Format</code> grava em que inline o tile começa, e o split vira por grupo:</p>
+<pre><code># Dataset/index.py, TilesBuilder.build: uma coluna a mais em cada linha
+rows.append({..., 'inline': z, ...})
+
+# Dataset/index.py: uma função para o 1 - Model e o 3 - Predict
+from sklearn.model_selection import GroupShuffleSplit
+
+def splitTiles(df, val_size=0.1, test_size=0.0, seed=42):
+    groups = df['inline']
+    test   = df.iloc[:0]
+
+    if test_size:
+        keep, held = next(GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed).split(df, groups=groups))
+        df, test   = df.iloc[keep], df.iloc[held]
+
+    keep, held = next(GroupShuffleSplit(n_splits=1, test_size=val_size / (1 - test_size), random_state=seed).split(df, groups=df['inline']))
+    return df.iloc[keep], df.iloc[held], test
+
+# 1 - Model
+train_df, val_df, test_df = splitTiles(df, VAL_SIZE, TEST_SIZE)</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> todo tile de validação está num bloco em que nenhum tile foi para o treino. O treino mais próximo fica a pelo menos <code>4 × step − 3</code> inlines (37 no marlim com step 10, 9 no f3 com step 3), e as cópias espelhadas (se a solução A do item 1 for a escolhida) ficam sempre no mesmo conjunto do tile de origem.</li>
+<li><strong>Por que isso melhora o modelo e não só a métrica:</strong> a validação passa a medir o mesmo tipo de coisa que o <code>block_iou</code> (inlines que a rede não viu, a alguma distância do treino). O early stopping e o <code>ReduceLROnPlateau</code> passam a parar e a cortar o <code>lr</code> pelo que se quer de fato, em vez de por uma validação que é quase o treino.</li>
+<li><strong>Custo:</strong> a validação passa a ter ~8 blocos (marlim) ou ~5 (f3) em vez de ~200 tiles soltos, então o <code>val_iou</code> fica mais ruidoso entre épocas. Se oscilar demais, aumente o <code>patience</code> ou a fração de validação (ex.: 0,15).</li>
+<li><strong>Sem teste:</strong> como a métrica de teste não é mais usada, rode com <code>"test_size": 0</code>: o split fica 90/10 por bloco e nenhum bloco é desperdiçado.</li>
+<li><strong>O 3 - Predict</strong> chama a mesma <code>splitTiles</code>, para refazer o mesmo split e conferir o <code>n_images</code>.</li>
+</ul>
+
+<h3>3. <code>block_iou</code> mede interpolação</h3>
+<p><strong>Causa.</strong> Não é um erro: é o desenho do <code>step</code>. Os inlines medidos ficam entre os de treino, e a dificuldade depende da distância até o treino.</p>
+<p><strong>Solução A (sem treinar de novo): IoU pela distância ao treino.</strong> No <code>3 - Predict</code>, somar uma matriz de confusão por distância <code>d</code> do inline ao inline de treino mais próximo (1 a <code>2·step − 2</code>):</p>
+<pre><code># 3 - Predict, no PredictBuilder.update, para cada inline medido i
+trained  = np.flatnonzero((np.arange(N) // 4) % STEP == 0)
+distance = np.abs(np.arange(N)[:, None] - trained[None, :]).min(axis=1)      # distância de cada inline ao treino
+byDistance[distance[i]].update(masks[i], pred[i])                         # um Metrics por distância</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> em vez de um número só, sai uma curva <code>mIoU × distância</code>. Ela mostra quanto o modelo perde à medida que se afasta do dado interpretado e permite comparar rodadas de step diferentes na mesma distância.</li>
+<li><strong>Custo:</strong> nenhum treino novo; roda no <code>3 - Predict</code> dos modelos existentes.</li>
+</ul>
+<p><strong>Solução B: uma região contígua reservada.</strong> Um intervalo de inlines (ex.: os últimos 20 %) que nunca vira tile:</p>
+<pre><code># Dataset/index.py
+HOLDOUT = {'marlim': (2510, 3137), 'f3': (480, 601)}
+
+# TilesBuilder.build: pula os blocos que caem no HOLDOUT
+# 3 - Predict: a matriz do block_iou ignora o HOLDOUT e uma segunda matriz só do HOLDOUT gera o region_iou</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> no <code>HOLDOUT</code> o treino mais próximo fica a até centenas de inlines, então o <code>region_iou</code> mede generalização para uma área nova. O <code>block_iou</code> continua medindo interpolação, agora sem misturar as duas coisas.</li>
+<li><strong>Custo:</strong> ~20 % menos tiles de treino, e o resultado depende da geologia daquela faixa. Para não depender de uma faixa só, dá para fazer K rodadas, cada uma com uma faixa diferente.</li>
+</ul>
+
+<h3>4. Normalização global</h3>
+<ul>
+<li><strong>Solução:</strong> se a sísmica bruta (antes do p01/p99) estiver disponível, calcular os percentis só nos inlines que viram tile e aplicar ao volume inteiro. Se não estiver, manter como está e citar no texto.</li>
+<li><strong>Como resolve:</strong> nenhuma estatística dos inlines medidos entra no dado de entrada. Na prática a diferença é mínima: os percentis de 3137 inlines e de 316 deles quase coincidem, e não há rótulo envolvido.</li>
+</ul>
+
+<h3>5. Costuras na predição do bloco</h3>
+<p><strong>Causa.</strong> <code>PredictBuilder.process</code> prediz cada tile sozinho e escreve o <code>argmax</code>. O voxel na borda de um tile é predito com metade do contexto que teria no centro, e o vizinho não ajuda.</p>
+<p><strong>Solução: janela deslizante com sobreposição e média ponderada.</strong></p>
+<pre><code># 3 - Predict, PredictBuilder.process
+from monai.inferers import sliding_window_inference
+
+block  = torch.from_numpy(self.normalize(img))[None, None].to(network.device)    # (1, 1, 4, 768, 2304), já preenchido
+logits = sliding_window_inference(block, self.size, BATCH_SIZE, network.model, overlap=(0, 0.5, 0.5), mode='gaussian')
+result = torch.argmax(logits, dim=1)[0].cpu().numpy()</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> com 50 % de sobreposição em z e xline, cada voxel é predito por até 4 janelas, e o peso gaussiano dá mais valor à janela em que ele está perto do centro. As bordas dos tiles deixam de ser predições isoladas, e as linhas retas de descontinuidade somem do <code>predicted.npy</code>.</li>
+<li><strong>Custo:</strong> ~4× o tempo de predição do bloco e mais memória de GPU. Detalhe: com <code>scaling</code> por tile (<code>normalize</code>/<code>standardize</code>), a normalização precisa ser feita janela a janela (ou trocada por uma do bloco), senão a entrada fica diferente da do treino. Com o <code>scaling: null</code> atual não há problema.</li>
+<li><strong>Combina com a solução B do item 1:</strong> a soma ponderada já trata a sobreposição do último tile.</li>
+</ul>
+
+<h3>6. Zeros nos inlines de treino sem <code>SAVE_PRED</code></h3>
+<pre><code># 3 - Predict, PredictBuilder.update
+self.pred = np.full(seismic.shape, 255, dtype=np.uint8)    # era np.zeros: 0 é a classe 0</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> inline não predito fica com 255, um valor fora das classes que qualquer conta ou figura denuncia, em vez de passar por fácies 0. Com <code>SAVE_PRED = True</code> todo inline é sobrescrito e o arquivo sai idêntico ao de hoje.</li>
+</ul>
+
+<h3>7. <code>"step": null</code> quebra o <code>Format</code></h3>
+<pre><code># Dataset/marlim/Format.ipynb e Dataset/f3/Format.ipynb
+STEP = OPTIONS.get('step') or 3     # era OPTIONS.get('step', 3), que devolve None com a chave nula</code></pre>
+<ul>
+<li><strong>Como resolve:</strong> <code>null</code> volta a significar “o padrão”, como o <code>Task/index.py</code> já assume.</li>
+</ul>
+
+<h3>8. <code>CLAUDE.md</code> desatualizado</h3>
+<ul>
+<li><strong>Solução:</strong> trocar <code>normalize</code> por <code>scaling</code> (<code>'percentile'</code>, <code>'normalize'</code>, <code>'standardize'</code>, <code>null</code>) no fluxo de dados e nas checagens; tirar o <code>0 - Model_CV.ipynb</code>; e registrar as mudanças acima conforme forem aplicadas (coluna <code>inline</code>, <code>splitTiles</code>, <code>HOLDOUT</code>).</li>
+<li><strong>Como resolve:</strong> quem (pessoa ou agente) ler o <code>CLAUDE.md</code> para mudar o código parte do pipeline real.</li>
+</ul>
+
+<h3>Ordem sugerida</h3>
+<ol>
+<li><strong>Itens 1 (solução B) e 2 juntos</strong>, com <code>"test_size": 0</code>: um <code>Format</code> novo e uma rodada de referência. É o que muda o modelo.</li>
+<li><strong>Itens 3A e 5</strong> no <code>3 - Predict</code>: dá para rodar nos modelos antigos e nos novos, sem treinar.</li>
+<li><strong>Itens 6, 7 e 8:</strong> uma linha cada.</li>
+<li><strong>Item 3B</strong>, se quiser uma métrica de generalização para uma área nova.</li>
+</ol>
+
+</main>
+</body>
+</html>

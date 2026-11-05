@@ -9,8 +9,9 @@ lint nem suíte de testes — a verificação é rodar o notebook de cima para b
 
 ## Ambiente e execução
 
-Tudo roda no python do `base` do conda (torch 2.7.1+cu128, monai 1.5.2, torchmetrics, papermill, opencv, scipy); o kernel
-`python3` dos notebooks resolve para ele. O env `fault_pred` **não tem** torchmetrics nem papermill.
+Nesta máquina (`grva-mint`) tudo roda no env `torch-gpu` do conda (torch 2.7.1+cu118, monai 1.5.2, torchmetrics,
+papermill; Quadro P6000 de 24 GB): o `base` **não tem** monai nem papermill, e o kernel `python3` só resolve para o
+`torch-gpu` quando o `index.py` roda com ele ativado (`conda activate torch-gpu`).
 
 - **Campanha de treinos (o caminho normal):** edite `Task/task.json` (lista de rodadas, cada uma no formato de
   `Task/info.json`) e rode `cd Task && python index.py`. Para cada rodada ele grava `Task/info.json`, executa
@@ -37,11 +38,11 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
    `(inline, z, xline)` já no p01/p99 do bloco em `[0, 1]`, e `npy_multiclass_cut.npy`, o rótulo uint8 com as classes
    0–5. A classe 0 é uma fácies como as outras, **não é fundo**.
    **`Dataset/f3/files/`** — os patches brutos do F3 (`seismics/` e `masks/`, `patch_dDDDD_hHHHH_wWWWW.dat` float32
-   `(4, 64, 64)`, sobrepostos pela metade); o `Format` do `f3` remonta com o `PatchAssembler` o volume `(603, 287, 933)`
-   em `f3_seismic.npy`/`f3_masks.npy` e corta como o do `marlim`. Esse volume é o `(601, 255, 901)` do benchmark de
-   Alaudah et al. (2019) com borda refletida (1 inline, 16 amostras e 16 xlines de cada lado). Os nomes dos volumes de
-   cada dataset ficam no `VOLUMES` do `Dataset/index.py` e a região do dado real (sem a borda) no `VALID`, os dois lidos
-   pelo `3 - Predict`.
+   `(4, 64, 64)`, sobrepostos pela metade) ou, como agora, já o `f3_seismic.npy`/`f3_masks.npy` `(601, 255, 901)` do
+   benchmark de Alaudah et al. (2019), sem borda e em `[0, 1]` (`"scaling": null`); o `Format` do `f3` só remonta com o
+   `PatchAssembler` quando esses `.npy` faltam (o que dava o `(603, 287, 933)` com borda refletida) e corta como o do
+   `marlim`. Os nomes dos volumes de cada dataset ficam no `VOLUMES` do `Dataset/index.py` e a região do dado real no
+   `VALID` (vazio hoje: o volume inteiro é dado real), os dois lidos pelo `3 - Predict`.
 2. **`Dataset/marlim/Format.ipynb`.** Corta um bloco de `img_size[0]` inlines a cada `step` (padrão 3) em tiles
    `img_size`, com a borda do volume preenchida por reflexão (o rótulo pela borda), e grava `tiles/{images,masks}` e o
    `DataBase.csv` (`img_path`/`mask_path` absolutos, `shape`, estatísticas, `msk_max`, `step`, `normalize`). Com
@@ -57,33 +58,34 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
    aquecimento 1e-6 → `lr` em 10 épocas e cosseno até 1e-7 a cada batch (a agenda da ResACEUnet), `ModelEMA` do
    `Model/EMA/` quando `ema` é true, deep supervision com pesos 1/0.5/0.25 quando a rede devolve lista, progresso
    corrente em `Model/progress.json`). Salva `Model/Backup/model_N/` com `info.json`, `model.pth`
-   (`{'model', 'optimizer', 'timestamp', 'history'}`), `train.png`, `classes.png` e `predictions/`; `N` é o maior
+   (`{'model', 'optimizer', 'timestamp', 'history'}`), `train.png`, `classes.png`, `predictions/` e, só com `augmentations`, `augmentations/` (15 tiles de treino, original × aumentado, com o sorteio da rede em épocas espalhadas); `N` é o maior
    `model_N` + 1. No `info.json` salvo, `processing` é o `Task/info.json` exatamente como veio (copiar e colar reproduz a
    rodada), `division` guarda o split (`val_size`, `test_size`, `step`, `n_images`, e `k_fold` no CV), `model` os
-   argumentos da rede (o `model.img_size` vem do `shape` do `DataBase.csv` ou, com `crop`, da janela do recorte) e `iou`
-   o IoU de cada classe no teste. **`Model/0 - Model_CV.ipynb`** é o mesmo treino em K dobras (salva a melhor).
+   argumentos da rede (o `model.img_size` vem do `shape` do `DataBase.csv` ou, com `crop`, da janela do recorte) e
+   `test_iou` o IoU de cada classe no teste (o `3 - Predict` regrava pela matriz de voxels). **`Model/0 - Model_CV.ipynb`** é o mesmo treino em K dobras (salva a melhor).
 5. **`Model/2 - Compare.ipynb`** junta todo `info.json` da pasta `BACKUP` numa tabela (o `block_iou` entra como a
-   média e o `block_metrics` pelas médias, com prefixo `block_`) e compara variações com a `VariationAnalysis` (média±std entre trials).
+   média e o `test_metrics`/`block_metrics` pelas médias, com prefixo `test_`/`block_`) e compara variações com a `VariationAnalysis` (média±std entre trials).
 6. **`Model/3 - Predict.ipynb`** — pega o último modelo de `BASE_PATH` (ou o `modelId` fixado) e avalia sempre no dataset
    em que ele treinou. Refaz o split de teste pelo `division` (confere `n_images`, `normalize` e `step`) e mede pela
-   matriz de confusão `classes × classes` dos voxels (PA, MCA, IoU, FWIU e F1 por classe; a média do IoU é o
-   `test_iou`), salva em `confusion_matrix.png` (em inglês, `Real` × `Predicted`); com `test_size` 0 essa parte é
+   matriz de confusão `classes × classes` dos voxels (a classe `Metrics` de `Model/Metrics/index.py`), gravando no
+   `info.json` o `test_iou` (IoU por classe e `mean`) e o `test_metrics`, com a matriz salva em `confusion_matrix.png` (em inglês, `Real` × `Predicted`); com `test_size` 0 essa parte é
    pulada. Depois prediz o **bloco inteiro** (o volume do dataset) em blocos do tile, pulando os inlines que viraram
-   tile, com a mesma normalização, o mesmo `amp` e a mesma predição do treino (`Transforms.infer`). Mede só a região
-   `VALID` do dataset e grava no `info.json` o `block_iou` e o `block_metrics` (`pa`, `mca`, `miou`, `fwiu`, `mf1` e,
-   por classe, `class_accuracy`, `precision`, `iou` e `f1`: as métricas dos estudos de `Estudos/COMPARACAO.md`), além
+   tile, com a mesma normalização, o mesmo `amp` e a mesma predição do treino (`Augmentations.infer`). Mede só a região
+   `VALID` do dataset e grava no `info.json` o `block_iou` e o `block_metrics`, no formato do `test_metrics` (`accuracy`, `mean_class_accuracy`,
+   `mean_precision`, `mean_iou`, `frequency_weighted_iou`, `mean_f1` e, por classe, `class_accuracy`, `precision`, `iou`
+   e `f1`: as métricas dos estudos de `Estudos/COMPARACAO.md` por extenso), além
    de `block_classes.png`, `block_confusion_matrix.png` e `views/` (no `volume_pred.png` a legenda traz o IoU de cada
-   classe no bloco e o título o mIoU). (Antes as chaves eram `marlim_*`; os backups foram
-   migrados.) Com `SAVE_PRED = True` prediz também os inlines de treino e salva o volume completo em `predicted.npy` no
+   classe no bloco e o título o mIoU). (Antes as chaves eram `marlim_*`, o `test_iou` era `iou` e
+   as métricas `pa`/`mca`/`miou`/`fwiu`/`mf1`; os backups foram migrados.) Com `SAVE_PRED = True` prediz também os inlines de treino e salva o volume completo em `predicted.npy` no
    backup (uint8, mesmo shape e classes do rótulo do dataset; ~3,5 GB no `marlim`); a métrica continua só fora do `step`.
-7. **`Documents/Backups/Backup1|Backup2|Backup3/model_N/`** guardam campanhas antigas do `marlim` no formato de
+7. **`Documents/Backups/Backup1…Backup4/model_N/`** guardam campanhas antigas (1–3 do `marlim`, 4 do `f3`) no formato de
    `Model/Backup` (as de antes do `division`: o `3 - Predict` lê `n_images`/`step` do `processing` e usa o `test_size`
    0.1 de então); os notebooks trocam a pasta pelo `BACKUP`/`BASE_PATH`.
 
 ## Convenções que atravessam o repositório
 
 - **Módulo é pasta com `index.py`** exportando o tipo principal: `from Network.index import ModelNetwork`,
-  `from Losses.index import Losses`, `from Transforms.index import Transforms`. Notebook fora da pasta ajusta o path
+  `from Losses.index import Losses`, `from Augmentations.index import Augmentations`. Notebook fora da pasta ajusta o path
   (`sys.path.append('..')`). Importar módulo nunca executa trabalho.
 - **Eixos:** o tile é `(inline, z, xline)`, o mesmo `(x, z, y)` do Falhas, mas o inline tem só 4 amostras. Toda rede
   deriva o pool/passo de cada eixo do `img_size` (`getPools`/`_compute_pools`: um eixo só é reduzido enquanto tem
@@ -99,9 +101,9 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
   `alpha` do `focal` não é aplicado (o MONAI daria 1 − alpha à classe 0 como se fosse fundo). No MONAI 1.5.2 o termo
   focal do `DiceFocalLoss` é sempre sigmoide, mesmo no caso multiclasse.
 - **Aumentação:** só pelo `augmentations` do `info.json` (`null`/ausente = tiles do `Format` como estão).
-  `Model/Transforms/index.py` é o do Falhas (receita da ResACEUnet + `zoom`, sorteio no `DataLoader` com semente
+  `Model/Augmentations/index.py` (a antiga `Transforms/`, classe `Augmentations`) é o do Falhas (receita da ResACEUnet + `zoom`, sorteio no `DataLoader` com semente
   `(42 + trial, época, índice)`, `n_aug`, na ordem do JSON e só no treino; com `crop` a rede é montada na janela e
-  valida/testa/prediz o tile inteiro por `Transforms.infer`) com o rótulo multiclasse: a máscara segue a imagem pelo
+  valida/testa/prediz o tile inteiro por `Augmentations.infer`) com o rótulo multiclasse: a máscara segue a imagem pelo
   vizinho mais próximo, a borda da rotação e da suavização espelha o tile (borda zero seria sísmica morta com a classe
   0), o `crop` centra numa classe sorteada por igual entre as do tile e o `rotate90` só aceita plano quadrado. No tile
   `(inline, z, xline)`: `flip` em `[0, 2]`, `rotate` em `[[1, 2]]`, recorte do tipo `[4, 128, 128]`; nada que vire o `z`.
@@ -116,7 +118,7 @@ Os estágios trocam **arquivos**, nunca variáveis, e cada um lê o que o anteri
 Ao levar uma mudança de um repositório para o outro, só isto deve continuar diferente:
 
 - Multiclasse: `MULTICLASS = True` com `classes` do `msk_max`, `getClasses` (IoU por classe) e a paleta `FACIES_COLORS`
-  no `utils`/`Plotter`/`plotPrediction`; o `alpha` do `focal` desligado no multiclasse; o `Transforms` com rótulo por
+  no `utils`/`Plotter`/`plotPrediction`; o `alpha` do `focal` desligado no multiclasse; o `Augmentations` com rótulo por
   vizinho mais próximo, borda espelhada e `crop` por classe; o `3 - Predict` com matriz `classes × classes` e sem o
   protocolo de recortes da Tabela 2 da ResACEUnet (que é de falha).
 - Tile `(4, 256, 256)`: pools/passos por eixo nas redes, `Segresnet` com pad, split 80/10/10, `step` no `division`, o

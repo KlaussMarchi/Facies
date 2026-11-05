@@ -1,0 +1,2 @@
+o dado já está padronizado e normalizado, o percentil é opcional e o aplica pois o dado fica muito cinza, e o percentil
+pode ser aplicado junto a normalização/paronização para o melhorar 
